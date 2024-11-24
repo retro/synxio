@@ -1,0 +1,33 @@
+{
+  "name": "@repo/synxio-dev-server",
+  "version": "0.0.0",
+  "exports": {
+    "./app": "./src/app.ts"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "tsx watch src/index.ts"
+  },
+  "type": "module",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@repo/typescript-config": "*",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "@repo/core": "*",
+    "@types/ws": "^8.5.13",
+    "cors": "^2.8.5",
+    "effect": "^3.10.16",
+    "express": "^4.21.1",
+    "jsondiffpatch": "^0.6.0",
+    "path-to-regexp": "^8.2.0",
+    "ws": "^8.18.0"
+  }
+}

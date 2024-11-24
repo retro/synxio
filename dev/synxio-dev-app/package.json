@@ -1,0 +1,38 @@
+{
+  "name": "synxio-dev-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "react-router build",
+    "dev": "react-router dev",
+    "start": "react-router-serve ./build/server/index.js",
+    "typecheck": "react-router typegen && tsc --build --noEmit"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^3.9.1",
+    "@react-router/node": "^7.0.1",
+    "@react-router/serve": "^7.0.1",
+    "@repo/synxio-dev-server": "*",
+    "immutable-json-patch": "^6.0.1",
+    "isbot": "^5.1.17",
+    "jotai": "^2.10.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-hook-form": "^7.53.2",
+    "react-router": "^7.0.1",
+    "tiny-invariant": "^1.3.3",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@react-router/dev": "^7.0.1",
+    "@types/node": "^20",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.15",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vite-tsconfig-paths": "^5.1.2"
+  }
+}

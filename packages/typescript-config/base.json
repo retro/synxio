@@ -11,9 +11,15 @@
     "moduleDetection": "force",
     "moduleResolution": "NodeNext",
     "noUncheckedIndexedAccess": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
+    "strictNullChecks": true,
     "strict": true,
+    "allowJs": false,
+    "checkJs": false,
     "target": "ES2022"
   }
 }
