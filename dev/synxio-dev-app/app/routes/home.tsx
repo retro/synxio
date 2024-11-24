@@ -1,6 +1,6 @@
 import type { Route } from "./+types/home";
 import { Welcome } from "../welcome/welcome";
-import { useSynxio } from "~/lib/synxio";
+import { useSynxio, Synxio } from "~/lib/synxio";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -20,51 +20,49 @@ const FormSchema = z.object({
 type FormSchema = z.infer<typeof FormSchema>;
 
 function ChatMessage({ id }: { id: string }) {
-  const component = useSynxio("ChatMessage", id);
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors, isSubmitSuccessful },
-  } = useForm<FormSchema>({
-    resolver: zodResolver(FormSchema),
-  });
-
-  const onSubmit = (data: FormSchema) => {
-    const url = component?.endpoints.message;
-
-    if (!url) {
-      return;
-    }
-    fetch(`http://localhost:3000/${url}`, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(data),
-    });
-  };
-
-  useEffect(() => {
-    if (isSubmitSuccessful) {
-      reset();
-    }
-  }, [isSubmitSuccessful]);
-
-  if (!component) {
-    return null;
-  }
-
   return (
-    <div>
-      <h2>{component.name}</h2>
-      <form onSubmit={handleSubmit(onSubmit)}>
-        <input {...register("name")} placeholder="Name" />
-        {errors.name && <span>This field is required</span>}
-        <button type="submit">Submit</button>
-      </form>
-    </div>
+    <Synxio.Component
+      name="ChatMessage"
+      id={id}
+      whenRunning={(component) => {
+        const {
+          register,
+          handleSubmit,
+          reset,
+          formState: { errors, isSubmitSuccessful, isSubmitting },
+        } = useForm<FormSchema>({
+          resolver: zodResolver(FormSchema),
+        });
+
+        const onSubmit = async (data: FormSchema) => {
+          const url = component.endpoints.message;
+
+          await fetch(`http://localhost:3000/${url}`, {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(data),
+          });
+        };
+
+        if (isSubmitting || component.state.isLoading) {
+          return <div>Loading...</div>;
+        }
+
+        return (
+          <div>
+            <h2>{component.name}</h2>
+            <form onSubmit={handleSubmit(onSubmit)}>
+              <input {...register("name")} placeholder="Name" />
+              {errors.name && <span>This field is required</span>}
+              <button type="submit">Submit</button>
+            </form>
+          </div>
+        );
+      }}
+    />
   );
 }
 
@@ -84,32 +82,31 @@ function ChatMessageResult({ id }: { id: string }) {
 }
 
 export default function Home() {
-  const value = useSynxio("Chat");
-
-  if (!value) {
-    return null;
-  }
-
   return (
-    <div>
-      <h1>Hello</h1>
-      {value.state.names.map(({ name, age }) => (
-        <div key={name}>
-          {name} - {age}
+    <Synxio.Component
+      name="Chat"
+      whenRunning={(component) => (
+        <div>
+          <h1>Hello</h1>
+          {component.state.names.map(({ name, age }, idx) => (
+            <div key={idx}>
+              {name} - {age}
+            </div>
+          ))}
+
+          <hr />
+
+          {component.components.ChatMessageResult?.map((c) => (
+            <ChatMessageResult id={c} key={c} />
+          ))}
+
+          <hr />
+
+          {component.components.ChatMessage ? (
+            <ChatMessage id={component.components.ChatMessage} />
+          ) : null}
         </div>
-      ))}
-
-      <hr />
-
-      {value.components.ChatMessageResult?.map((c) => (
-        <ChatMessageResult id={c} />
-      ))}
-
-      <hr />
-
-      {value.components.ChatMessage ? (
-        <ChatMessage id={value.components.ChatMessage} />
-      ) : null}
-    </div>
+      )}
+    ></Synxio.Component>
   );
 }

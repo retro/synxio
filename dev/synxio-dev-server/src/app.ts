@@ -12,9 +12,9 @@ const messageEndpoint = Endpoint.make(Schema.Struct({ name: Schema.String }));
 
 const ChatMessage = Component.setup("ChatMessage", {
   endpoints: { message: messageEndpoint },
-  state: {},
+  state: { isLoading: State.make<boolean>(() => false) },
   components: {},
-}).build(({ endpoints }, payload: { index: number }) =>
+}).build(({ endpoints, state }, payload: { index: number }) =>
   Effect.gen(function* () {
     console.log("TEST");
 
@@ -31,6 +31,8 @@ const ChatMessage = Component.setup("ChatMessage", {
 
     console.log("NAME", name);
 
+    yield* State.update(state.isLoading, true);
+
     const age = yield* Api.io(
       `age-${name}`,
       Effect.tryPromise(async () => {
@@ -39,6 +41,8 @@ const ChatMessage = Component.setup("ChatMessage", {
         return json.age as number;
       }).pipe(Effect.catchTag("UnknownException", () => Effect.succeed(0)))
     );
+
+    yield* State.update(state.isLoading, false);
 
     return Option.some({ name, age });
   })

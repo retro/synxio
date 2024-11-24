@@ -9,7 +9,7 @@ import {
 
 import type { Route } from "./+types/root";
 import "./app.css";
-import { SynxioProvider } from "./lib/synxio";
+import { Synxio } from "./lib/synxio";
 
 export const links: Route.LinksFunction = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -44,9 +44,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <SynxioProvider>
+    <Synxio.Provider>
       <Outlet />
-    </SynxioProvider>
+    </Synxio.Provider>
   );
 }
 
