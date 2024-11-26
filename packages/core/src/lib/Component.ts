@@ -291,7 +291,7 @@ export type GetComponentEndpointsType<T extends AnyComponentSetup> = Simplify<{
 export type ComponentRef<_T> = string & { readonly _tag: unique symbol };
 
 export type GetComponentComponentsType<T extends AnyComponentSetup> = Simplify<{
-  [TKey in keyof GetComponentSetupConfig<T>["components"]]: GetComponentSetupConfig<T>["components"][TKey] extends AnyComponent
+  [TKey in keyof GetComponentSetupConfig<T>["components"]]?: GetComponentSetupConfig<T>["components"][TKey] extends AnyComponent
     ? ComponentRef<
         GetComponentSetupConfig<T>["components"][TKey]["setup"]["name"]
       >

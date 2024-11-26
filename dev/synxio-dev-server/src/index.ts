@@ -1,4 +1,11 @@
-import { Effect, pipe, Stream, Runtime as EffectRuntime, Ref } from "effect";
+import {
+  Effect,
+  pipe,
+  Stream,
+  Runtime as EffectRuntime,
+  Ref,
+  Fiber,
+} from "effect";
 import { Runtime, type RuntimeContextState } from "@repo/core";
 import * as jsondiffpatch from "jsondiffpatch";
 import * as jsonPatchFormatter from "jsondiffpatch/formatters/jsonpatch";
@@ -6,7 +13,7 @@ import express from "express";
 import http from "http";
 import * as ptr from "path-to-regexp";
 import { WebSocketServer, WebSocket } from "ws";
-import { Chat } from "./app.js";
+import { SocialMediaGenerator } from "./app.js";
 import cors from "cors";
 
 function makeChangesStreamPatcher() {
@@ -38,13 +45,13 @@ const program = Effect.gen(function* () {
   const websockets = new Set<WebSocket>();
 
   const streamPatcher = makeChangesStreamPatcher();
-  const { run, context } = yield* Runtime.build(Chat).initialize({
-    foo: "bar",
-  });
+  const { run, context } = yield* Runtime.build(
+    SocialMediaGenerator
+  ).initialize({});
 
-  yield* Effect.forkDaemon(run);
+  const runningFiber = yield* Effect.forkDaemon(run);
 
-  yield* Effect.forkDaemon(
+  const streamFiber = yield* Effect.forkDaemon(
     pipe(
       context.state.changes,
       Stream.debounce(10),
@@ -95,7 +102,6 @@ const program = Effect.gen(function* () {
     runSync(
       semaphore.withPermits(1)(
         Effect.gen(function* () {
-          console.log("AAA");
           const currentState = yield* Ref.get(state);
           if (currentState) {
             ws.send(wsMessage("state", currentState));
@@ -124,9 +130,11 @@ const program = Effect.gen(function* () {
   server.listen(3000, () => {
     console.log("Server listening on port 3000!");
   });
-});
+
+  yield* Fiber.join(streamFiber);
+}).pipe(Effect.scoped);
 
 Effect.runPromise(program).then(
-  (value) => console.log(value),
+  (value) => console.log("FINAL", value),
   (error) => console.error(error)
 );

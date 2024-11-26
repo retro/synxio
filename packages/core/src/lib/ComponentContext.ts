@@ -32,6 +32,18 @@ export type ComponentMountInfo =
       name: string;
     };
 
+export function mountInfoToPath(mountInfo: ComponentMountInfo) {
+  return mountInfo.type === "root"
+    ? mountInfo.name
+    : mountInfo.type === "singleton"
+      ? `${mountInfo.parentPath}/${mountInfo.parentMountedOnProperty}:${mountInfo.name}`
+      : `${mountInfo.parentPath}/${mountInfo.parentMountedOnProperty}:${mountInfo.name}:${mountInfo.key}`;
+}
+
+export function mountInfoToId(mountInfo: ComponentMountInfo) {
+  return hashString(mountInfoToPath(mountInfo));
+}
+
 export class ComponentContextService {
   static make(scope: Scope.Scope, mountInfo: ComponentMountInfo) {
     return Effect.succeed(new ComponentContextService(scope, mountInfo));
@@ -44,15 +56,11 @@ export class ComponentContextService {
     readonly scope: Scope.Scope,
     readonly mountInfo: ComponentMountInfo
   ) {
-    this.path =
-      mountInfo.type === "root"
-        ? mountInfo.name
-        : mountInfo.type === "singleton"
-          ? `${mountInfo.parentPath}/${mountInfo.parentMountedOnProperty}:${mountInfo.name}`
-          : `${mountInfo.parentPath}/${mountInfo.parentMountedOnProperty}:${mountInfo.name}:${mountInfo.key}`;
+    this.path = mountInfoToPath(mountInfo);
+
     this.id = hashString(this.path);
-    console.log(this.path);
-    console.log(this.id);
+    console.log("!", this.path);
+    console.log("!!", this.id);
   }
   openEndpoint<T>(
     mountedOnProperty: string,
@@ -72,8 +80,8 @@ export class ComponentContextService {
         schema
       );
 
-      console.log(path);
-      console.log(id);
+      console.log("!!!", path);
+      console.log("!!!!", id);
       return {
         value,
         url: endpointIdToUrl(id),
@@ -109,6 +117,7 @@ export class ComponentContextService {
     return Effect.gen(this, function* () {
       const persistence = yield* Persistence;
       const id = `io:${this.path}/${key}`;
+      console.log(">>>>>>>>>>>>>>>>>> IO:", id);
       return yield* pipe(
         persistence.get(id),
         Effect.flatMap((value) =>

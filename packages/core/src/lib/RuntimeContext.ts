@@ -11,6 +11,7 @@ import {
   Exit,
   pipe,
   Array,
+  FiberMap,
 } from "effect";
 import {
   makeRuntimeContextState,
@@ -25,18 +26,21 @@ import type { AnyComponent, GetComponentPayload } from "./Component.js";
 import {
   ComponentContext,
   ComponentContextService,
+  mountInfoToId,
   type ComponentMountInfo,
 } from "./ComponentContext.js";
 
 export class RuntimeContextService {
   static make() {
-    return Effect.andThen(
-      SubscriptionRef.make(makeRuntimeContextState()),
-      (value) => new RuntimeContextService(value)
-    );
+    return Effect.gen(function* () {
+      const componentFibers = yield* FiberMap.make<string>();
+      const state = yield* SubscriptionRef.make(makeRuntimeContextState());
+      return new RuntimeContextService(state, componentFibers);
+    });
   }
   constructor(
-    readonly state: SubscriptionRef.SubscriptionRef<RuntimeContextState>
+    readonly state: SubscriptionRef.SubscriptionRef<RuntimeContextState>,
+    private readonly componentFibers: FiberMap.FiberMap<string>
   ) {}
   mountComponent<TComponent extends AnyComponent>(
     parentScope: Scope.Scope,
@@ -52,8 +56,9 @@ export class RuntimeContextService {
 
     const state = component.setup.getInitialState();
     const runtimeContextService = this;
+    const id = mountInfoToId(mountInfo);
 
-    return Effect.gen(function* () {
+    return Effect.gen(this, function* () {
       const mountEffect = pipe(
         Effect.gen(function* () {
           const scope = yield* Effect.scope;
@@ -65,13 +70,10 @@ export class RuntimeContextService {
           yield* Effect.addFinalizer((exit) =>
             Effect.gen(function* () {
               if (Exit.isInterrupted(exit)) {
-                yield* runtimeContextService.deregisterComponent(
-                  mountInfo,
-                  componentContextService.id
-                );
+                yield* runtimeContextService.deregisterComponent(mountInfo, id);
               } else {
                 yield* runtimeContextService.updateComponentStatus(
-                  componentContextService.id,
+                  id,
                   Exit.isSuccess(exit) ? "completed" : "failed"
                 );
               }
@@ -91,7 +93,15 @@ export class RuntimeContextService {
         }),
         Effect.scoped
       );
-      return yield* Effect.forkIn(mountEffect, parentScope);
+
+      yield* FiberMap.remove(this.componentFibers, id);
+
+      const fiber = yield* Effect.forkIn(mountEffect, parentScope);
+
+      yield* FiberMap.set(this.componentFibers, id, fiber);
+      yield* Effect.yieldNow();
+
+      return fiber;
     });
   }
 
@@ -128,15 +138,19 @@ export class RuntimeContextService {
               Struct.evolve(parentComponent, {
                 components: (components) => {
                   if (mountInfo.type === "singleton") {
-                    return Record.set(components, mountInfo.name, id);
+                    return Record.set(
+                      components,
+                      mountInfo.parentMountedOnProperty,
+                      id
+                    );
                   }
                   const currentComponents = Record.get(
                     components,
-                    mountInfo.name
+                    mountInfo.parentMountedOnProperty
                   ).pipe(Option.getOrElse(() => []));
                   return Record.set(
                     components,
-                    mountInfo.name,
+                    mountInfo.parentMountedOnProperty,
                     Array.append(currentComponents, id)
                   );
                 },
@@ -162,15 +176,18 @@ export class RuntimeContextService {
               Struct.evolve(parentComponent, {
                 components: (components) => {
                   if (mountInfo.type === "singleton") {
-                    return Record.remove(components, mountInfo.name);
+                    return Record.remove(
+                      components,
+                      mountInfo.parentMountedOnProperty
+                    );
                   }
                   const currentComponents = Record.get(
                     components,
-                    mountInfo.name
+                    mountInfo.parentMountedOnProperty
                   ).pipe(Option.getOrElse(() => []));
                   return Record.set(
                     components,
-                    mountInfo.name,
+                    mountInfo.parentMountedOnProperty,
                     Array.filter(
                       currentComponents,
                       (componentId) => componentId !== id
