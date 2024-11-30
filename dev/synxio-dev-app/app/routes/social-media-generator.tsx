@@ -7,7 +7,6 @@ import { useForm } from "react-hook-form";
 import { useEffect } from "react";
 import { Textarea } from "~/components/ui/textarea";
 import { Button } from "~/components/ui/button";
-import { Checkbox } from "~/components/ui/checkbox";
 import {
   Form,
   FormControl,
@@ -16,15 +15,6 @@ import {
   FormItem,
   FormLabel,
 } from "~/components/ui/form";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "~/components/ui/dialog";
 import { AnyEndpointRef, EndpointRef } from "@repo/core";
 
 const PostFeedbackSchema = z.object({
@@ -100,18 +90,15 @@ function Post({ id, site }: { id: string; site: string }) {
           <div className="border rounded p-4 space-y-2">
             <h2 className="text-md font-bold">{site} Post</h2>
             <div>
-              {component.state.isLoading ? (
-                <Spinner />
-              ) : (
-                <div className="space-y-4">
-                  <div>{component.state.post}</div>
-                  <hr />
-                  <PostFeedback
-                    messageUrl={component.endpoints.message}
-                    approvalUrl={component.endpoints.approval}
-                  />
-                </div>
-              )}
+              <div className="space-y-4">
+                <div>{component.state.post}</div>
+                {component.state.isLoading ? <Spinner /> : null}
+                <hr />
+                <PostFeedback
+                  messageUrl={component.endpoints.message}
+                  approvalUrl={component.endpoints.approval}
+                />
+              </div>
             </div>
           </div>
         );
@@ -137,7 +124,7 @@ function Post({ id, site }: { id: string; site: string }) {
 function Posts() {
   const component = useSynxio("SocialMediaGenerator");
 
-  if (!component) {
+  if (!component || component.status === "forbidden") {
     return null;
   }
 
@@ -188,10 +175,17 @@ function Spinner() {
 function GeneratingKeyPoints() {
   return Synxio.Component({
     name: "KeyPoints",
-    whenRunning: () => (
-      <div className="flex gap-2 items-center bg-white rounded px-2 py-1 text-zinc-800">
-        <Spinner />
-        Generating key points...
+    whenRunning: (component) => (
+      <div>
+        <div className="flex gap-2 items-center bg-white rounded px-2 py-1 text-zinc-800">
+          <Spinner />
+          Generating key points...
+        </div>
+        <ul className="list-disc ml-4">
+          {component.state.keyPoints.map((k, idx) => {
+            return <li key={idx}>{k}</li>;
+          })}
+        </ul>
       </div>
     ),
   });
@@ -218,6 +212,10 @@ function SocialMediaGeneratorInner() {
 
   if (!component) {
     return null;
+  }
+
+  if (component.status === "forbidden") {
+    return <div>You are not authorized to access this component</div>;
   }
 
   return (

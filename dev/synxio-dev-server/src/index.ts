@@ -4,6 +4,8 @@ import {
   App,
   StateUpdate,
   GetAppRootComponent,
+  AnyApp,
+  GetAppAuthorizerUserPayload,
 } from "@repo/core";
 import express from "express";
 import http from "http";
@@ -12,10 +14,18 @@ import { WebSocketServer } from "ws";
 import { SocialMediaGenerator } from "./app.js";
 import cors from "cors";
 import { randomUUID } from "crypto";
+import { z } from "zod";
 
 type ServableAppInitializeOrResumeResult = {
-  callEndpoint: (id: string, payload: any) => Promise<CallEndpointResult>;
-  subscribe: (cb: (stateUpdate: StateUpdate) => void) => Promise<() => void>;
+  callEndpoint: (
+    userAuthPayload: any,
+    id: string,
+    payload: any
+  ) => Promise<CallEndpointResult>;
+  subscribe: (
+    userAuthPayload: any,
+    cb: (stateUpdate: StateUpdate) => void
+  ) => Promise<() => void>;
 };
 
 type ServableApp = {
@@ -26,9 +36,9 @@ type ServableApp = {
   resume: (appId: string) => Effect.Effect<ServableAppInitializeOrResumeResult>;
 };
 
-class AppServer<TApp extends ServableApp> {
-  static make<TApp extends ServableApp>(app: TApp) {
-    return new AppServer<TApp>(app);
+class AppServer<TApp extends ServableApp, TAppAuthorizerUserPayload> {
+  static make<TApp extends AnyApp & ServableApp>(app: TApp) {
+    return new AppServer<TApp, GetAppAuthorizerUserPayload<TApp>>(app);
   }
 
   private readonly apps: Map<string, ServableAppInitializeOrResumeResult> =
@@ -56,17 +66,63 @@ class AppServer<TApp extends ServableApp> {
     return app;
   }
 
-  async callEndpoint(appId: string, id: string, payload: unknown) {
+  async callEndpoint(
+    appId: string,
+    userAuthPayload: TAppAuthorizerUserPayload,
+    id: string,
+    payload: unknown
+  ) {
     const app = await this.getApp(appId);
-    return await app.callEndpoint(id, payload);
+    return await app.callEndpoint(userAuthPayload, id, payload);
   }
-  async subscribe(appId: string, cb: (stateUpdate: StateUpdate) => void) {
+  async subscribe(
+    appId: string,
+    userAuthPayload: TAppAuthorizerUserPayload,
+    cb: (stateUpdate: StateUpdate) => void
+  ) {
     const app = await this.getApp(appId);
-    return await app.subscribe(cb);
+    return await app.subscribe(userAuthPayload, cb);
   }
 }
 
-const appServer = AppServer.make(App.build(SocialMediaGenerator));
+const appServer = AppServer.make(
+  App.build(
+    SocialMediaGenerator,
+    (
+      userPayload:
+        | "editor"
+        | "facebookEditor"
+        | "instagramEditor"
+        | "twitterEditor",
+      component
+    ) =>
+      Effect.gen(function* () {
+        switch (component.name) {
+          case "Post": {
+            console.log(userPayload, component);
+            return (
+              userPayload === "editor" ||
+              (userPayload === "facebookEditor" &&
+                component.payload.site === "facebook") ||
+              (userPayload === "instagramEditor" &&
+                component.payload.site === "instagram") ||
+              (userPayload === "twitterEditor" &&
+                component.payload.site === "twitter")
+            );
+          }
+          default:
+            return true;
+        }
+      })
+  )
+);
+
+const UserAuthSchema = z.union([
+  z.literal("editor"),
+  z.literal("twitterEditor"),
+  z.literal("instagramEditor"),
+  z.literal("facebookEditor"),
+]);
 
 const app = express();
 app.use(express.json());
@@ -86,7 +142,8 @@ app.post("/api/initialize", async (req, res) => {
 app.post("/api/:appId/endpoints/:id", async (req, res) => {
   const { id, appId } = req.params;
   const value = req.body;
-  const result = await appServer.callEndpoint(appId, id, value);
+  const userPayload = UserAuthSchema.parse(req.query.token);
+  const result = await appServer.callEndpoint(appId, userPayload, id, value);
   if (result.type === "success") {
     res.send("ok");
   } else {
@@ -100,14 +157,20 @@ const socketPathMatcher = ptr.match("/api/:appId/ws");
 const wss = new WebSocketServer({ noServer: true });
 
 server.on("upgrade", (req, socket, head) => {
-  const { pathname } = new URL(req.url!, "wss://base.url");
+  const { pathname, searchParams } = new URL(req.url!, "wss://base.url");
+  const userPayload = UserAuthSchema.parse(searchParams.get("token"));
+
   const match = socketPathMatcher(pathname);
   const appId = match ? match?.params.appId : null;
   if (typeof appId === "string") {
     wss.handleUpgrade(req, socket, head, async (ws) => {
-      const unsubscribe = await appServer.subscribe(appId, (stateUpdate) => {
-        ws.send(JSON.stringify(stateUpdate));
-      });
+      const unsubscribe = await appServer.subscribe(
+        appId,
+        userPayload,
+        (stateUpdate) => {
+          ws.send(JSON.stringify(stateUpdate));
+        }
+      );
       ws.on("close", () => {
         unsubscribe();
       });

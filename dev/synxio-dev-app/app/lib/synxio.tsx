@@ -2,8 +2,23 @@ import React, { useMemo, useEffect, useCallback } from "react";
 import { atom, createStore, useAtom, Provider, useAtomValue } from "jotai";
 import invariant from "tiny-invariant";
 import { App } from "@repo/synxio-dev-server/app";
-import { immutableJSONPatch } from "immutable-json-patch";
-import { AnyEndpointRef, GetEndpointRefValueType } from "@repo/core";
+import {
+  AnyEndpointRef,
+  ComponentState,
+  ComponentStateForbidden,
+  GetEndpointRefValueType,
+} from "@repo/core";
+import * as jsondiffpatch from "jsondiffpatch";
+import { diff_match_patch } from "@dmsnell/diff-match-patch";
+import { produce } from "immer";
+
+const jsondiffpatchInstance = jsondiffpatch.create({
+  arrays: {
+    detectMove: true,
+  },
+  // @ts-expect-error Original version breaks with surrogate pairs, this is a workaround
+  textDiff: { diffMatchPatch: diff_match_patch },
+});
 
 export function makeSynxioApp<
   T extends { rootName: string; components: Record<string, any> },
@@ -17,17 +32,21 @@ export function makeSynxioApp<
     children: React.ReactNode;
     appId: string;
   }) => {
+    const initialStoreValue = {
+      appId: props.appId,
+      components: {},
+    };
     const synxioStore = useMemo(() => {
       const store = createStore();
-      store.set(synxioValue, {
-        appId: props.appId,
-        components: {},
-      });
+      store.set(synxioValue, initialStoreValue);
       return store;
     }, []);
 
     useEffect(() => {
-      const socket = new WebSocket(`ws://localhost:3000/api/${props.appId}/ws`);
+      console.log("CONNECTING TO WS", props.appId);
+      const socket = new WebSocket(
+        `ws://localhost:3000/api/${props.appId}/ws?token=twitterEditor`
+      );
       socket.onmessage = (event) => {
         const { type, value } = JSON.parse(event.data);
         if (type === "state") {
@@ -36,17 +55,16 @@ export function makeSynxioApp<
             components: value,
           });
         } else if (type === "patch") {
-          const currentComponents = synxioStore.get(synxioValue)?.components;
-          if (currentComponents) {
-            const newValue = immutableJSONPatch(
-              currentComponents,
-              value
-            ) as Record<string, any>;
-            synxioStore.set(synxioValue, {
-              appId: props.appId,
-              components: newValue,
-            });
-          }
+          const currentStoreValue =
+            synxioStore.get(synxioValue) ?? initialStoreValue;
+
+          console.log("PATCH VALUE", value);
+
+          const newValue = produce(currentStoreValue, (draft) => {
+            jsondiffpatchInstance.patch(draft.components, value);
+          });
+
+          synxioStore.set(synxioValue, newValue);
         }
       };
       return () => {
@@ -125,33 +143,49 @@ export function makeSynxioApp<
     whenRunning,
     whenCompleted,
     whenFailed,
+    whenForbidden,
   }: {
     name: TComponentName;
     id?: string;
     whenRunning?: (
-      component: Extract<T["components"], { name: TComponentName }>
+      component: Extract<T["components"], { name: TComponentName }> & {
+        status: "running";
+      }
     ) => React.ReactNode;
     whenCompleted?: (
-      component: Extract<T["components"], { name: TComponentName }>
+      component: Extract<T["components"], { name: TComponentName }> & {
+        status: "completed";
+      }
     ) => React.ReactNode;
     whenFailed?: (
-      component: Extract<T["components"], { name: TComponentName }>
+      component: Extract<T["components"], { name: TComponentName }> & {
+        status: "failed";
+      }
+    ) => React.ReactNode;
+    whenForbidden?: (
+      component: Extract<T["components"], { name: TComponentName }> & {
+        status: "forbidden";
+      }
     ) => React.ReactNode;
   }) => {
     const component = useSynxio(name, id);
+
     if (!component) {
       return null;
     }
     const status = component.status;
 
     if (status === "running") {
-      return whenRunning?.(component) ?? null;
+      return whenRunning?.(component as any) ?? null;
     }
     if (status === "completed") {
-      return whenCompleted?.(component) ?? null;
+      return whenCompleted?.(component as any) ?? null;
     }
     if (status === "failed") {
-      return whenFailed?.(component) ?? null;
+      return whenFailed?.(component as any) ?? null;
+    }
+    if (status === "forbidden") {
+      return whenForbidden?.(component as any) ?? null;
     }
     return null;
   };

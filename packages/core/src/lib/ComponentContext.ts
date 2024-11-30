@@ -113,21 +113,20 @@ export class ComponentContextService {
       );
     });
   }
-  io<T>(key: string, eff: Effect.Effect<T, never, never>) {
+  io<A, E, R>(key: string, eff: Effect.Effect<A, E, R>) {
     return Effect.gen(this, function* () {
       const persistence = yield* Persistence;
       const id = `io:${this.path}/${key}`;
-      console.log(">>>>>>>>>>>>>>>>>> IO:", id);
       return yield* pipe(
         persistence.get(id),
         Effect.flatMap((value) =>
           pipe(
             value,
             Option.match({
-              onSome: (value) => Effect.succeed(value as T),
+              onSome: (value) => Effect.succeed(value as A),
               onNone: () =>
                 Effect.gen(this, function* () {
-                  const value = yield* eff;
+                  const value = yield* eff as Effect.Effect<A, E, R>;
                   yield* persistence.set(id, value);
                   return value;
                 }),

@@ -18,12 +18,26 @@ export interface ComponentState {
   components: Record<string, string | string[]>;
 }
 
+export type ComponentStateForbidden = {
+  name: string;
+  id: string;
+  parentId: string | null;
+  status: "forbidden";
+};
+
 export interface AppContextState {
   appId: string;
   openEndpoints: Record<string, OpenEndpoint>;
   components: Record<string, ComponentState>;
+  componentsMetadata: Record<
+    string,
+    {
+      generation: number;
+      payload: any;
+    }
+  >;
 }
 
 export function makeAppContextState(appId: string): AppContextState {
-  return { appId, openEndpoints: {}, components: {} };
+  return { appId, openEndpoints: {}, components: {}, componentsMetadata: {} };
 }

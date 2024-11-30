@@ -1,15 +1,23 @@
-import { Effect, pipe, Schema, Fiber, Array, Stream } from "effect";
-import { Component, State, Endpoint, Api, type GetAppType } from "@repo/core";
-import OpenAI from "openai";
-import { zodResponseFormat } from "openai/helpers/zod.mjs";
+import { Effect, pipe, Schema, Fiber, Array, Runtime } from "effect";
+import {
+  Component,
+  State,
+  Endpoint,
+  Api,
+  type GetAppType,
+  ComponentContext,
+} from "@repo/core";
 import { z } from "zod";
+import { createOpenAI } from "@ai-sdk/openai";
+import { CoreMessage, streamObject } from "ai";
 
-const openai = new OpenAI({
+const openai = createOpenAI({
   apiKey: process.env.OPENAI_API_KEY,
   organization: process.env.OPENAI_ORGANIZATION,
+  compatibility: "strict",
 });
 
-const Post = Component.setup("Post", {
+const PostSetup = Component.setup("Post", {
   endpoints: {
     message: Endpoint.make(
       Schema.Struct({
@@ -26,7 +34,9 @@ const Post = Component.setup("Post", {
     isLoading: State.make<boolean>(() => false),
   },
   components: {},
-}).build(
+});
+
+const Post = PostSetup.build(
   (
     { state, endpoints },
     payload: { site: "instagram" | "facebook" | "twitter"; keyPoints: string[] }
@@ -34,7 +44,7 @@ const Post = Component.setup("Post", {
     Effect.gen(function* () {
       // Define the messages to send to the OpenAI API. We don't need to store them
       // in the DB, IO is durable, and messages can be recomputed as needed
-      const messages: OpenAI.ChatCompletionMessageParam[] = [
+      const messages: CoreMessage[] = [
         {
           role: "system",
           content: `You are a helpful social media post generator. Your task is to generate a social media post for the given key points. The post should be compelling and engaging, and should follow the platform's guidelines and best practices.
@@ -57,9 +67,10 @@ Write a ${payload.site} post for the following key points:
       while (true) {
         // Show loading indicator, state is streamed to the frontend
         yield* State.update(state.isLoading, true);
+        yield* State.update(state.post, null);
 
         // Call the OpenAI API with the current messages and get the new post
-        const completion = yield* Api.io(
+        const value = yield* Api.io(
           `post-${idx}`,
           pipe(
             getPost(messages),
@@ -69,18 +80,16 @@ Write a ${payload.site} post for the following key points:
 
         yield* State.update(state.isLoading, false);
 
-        const value = completion?.choices[0]?.message?.parsed;
-
         if (!value) {
           break;
         }
 
         messages.push({
           role: "assistant",
-          content: value.content,
+          content: value,
         });
 
-        yield* State.update(state.post, value.content);
+        yield* State.update(state.post, value);
 
         // Open two endpoints - one for the user to send a message, and one for
         // the user approval
@@ -92,7 +101,7 @@ Write a ${payload.site} post for the following key points:
 
         // If the user approved the post, return the post
         if (result.kind === "approval") {
-          return { site: payload.site, post: value.content };
+          return { site: payload.site, post: value };
         }
 
         // Push the user's message to the messages array and continue
@@ -104,79 +113,111 @@ Write a ${payload.site} post for the following key points:
     })
 );
 
-function getPost(messages: OpenAI.ChatCompletionMessageParam[]) {
-  return Effect.tryPromise(async () => {
-    return await openai.beta.chat.completions.parse({
-      model: "gpt-4o-2024-08-06",
-      messages,
-      temperature: 0.5,
-      response_format: zodResponseFormat(
-        z.object({
+function getPost(messages: CoreMessage[]) {
+  return Effect.gen(function* () {
+    const { state } = yield* PostSetup.Api;
+    const runSync = Runtime.runFork(yield* Effect.runtime<ComponentContext>());
+
+    return yield* Effect.tryPromise(async () => {
+      const result = streamObject({
+        model: openai("gpt-4o-2024-08-06"),
+        temperature: 0.5,
+        schema: z.object({
           reasoning: z
             .string()
             .describe("Explain the reasoning behind the post"),
           content: z.string().describe("The content of the post"),
         }),
-        "post"
-      ),
+        schemaName: "post",
+        messages,
+      });
+
+      let content = "";
+
+      for await (const partialPost of result.partialObjectStream) {
+        if (partialPost.content) {
+          content = partialPost.content;
+          runSync(State.update(state.post, content));
+        }
+      }
+
+      return content;
     });
   });
 }
 
 // Generates key points from an article
 
-const KeyPoints = Component.setup("KeyPoints", {
+const KeyPointsSetup = Component.setup("KeyPoints", {
   endpoints: {},
-  state: {},
+  state: { keyPoints: State.make<string[]>(() => []) },
   components: {},
-}).build((_api, payload: { article: string }) =>
-  Effect.gen(function* () {
-    let run = 0;
-    // Retry 5 times
-    while (run < 5) {
-      // Call the OpenAI API with the article and get the key points
-      const completion = yield* Api.io(
-        "key-points",
-        pipe(
-          getKeyPoints(payload.article),
-          Effect.catchTag("UnknownException", () => Effect.succeed(null))
-        )
-      );
+});
 
-      const keyPoints = completion?.choices[0]?.message?.parsed;
+const KeyPoints = KeyPointsSetup.build(
+  ({ state }, payload: { article: string }) =>
+    Effect.gen(function* () {
+      let run = 0;
+      // Retry 5 times
+      while (run < 5) {
+        // Call the OpenAI API with the article and get the key points
+        const keyPoints = yield* Api.io(
+          "key-points",
+          pipe(
+            getKeyPoints(payload.article),
+            Effect.catchTag("UnknownException", () => Effect.succeed(null))
+          )
+        );
 
-      if (keyPoints) {
-        return keyPoints;
+        yield* State.update(state.keyPoints, keyPoints ?? []);
+
+        if (keyPoints) {
+          return keyPoints;
+        }
+
+        run++;
       }
-
-      run++;
-    }
-  })
+    })
 );
 
 function getKeyPoints(article: string) {
-  return Effect.tryPromise(async () => {
-    return await openai.beta.chat.completions.parse({
-      model: "gpt-4o-2024-08-06",
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a helpful assistant that generates key points from an article.",
-        },
-        {
-          role: "user",
-          content: `\
+  return Effect.gen(function* () {
+    const { state } = yield* KeyPointsSetup.Api;
+    const runSync = Runtime.runFork(yield* Effect.runtime<ComponentContext>());
+
+    return yield* Effect.tryPromise(async () => {
+      const result = streamObject({
+        model: openai("gpt-4o-2024-08-06"),
+        output: "array",
+        schema: z.string(),
+        schemaName: "keyPoints",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a helpful assistant that generates key points from an article.",
+          },
+          {
+            role: "user",
+            content: `\
 Write a list of key points from the following article
 
 > ${article}
 `,
-        },
-      ],
-      response_format: zodResponseFormat(
-        z.object({ keyPoints: z.array(z.string()) }),
-        "keyPoints"
-      ),
+          },
+        ],
+      });
+
+      const keyPoints: string[] = [];
+
+      for await (const keyPoint of result.elementStream) {
+        keyPoints.push(keyPoint);
+        runSync(
+          State.update(state.keyPoints, (current) => [...current, keyPoint])
+        );
+      }
+
+      return keyPoints;
     });
   });
 }
@@ -219,17 +260,17 @@ export const SocialMediaGenerator = SocialMediaGeneratorSetup.build(
       yield* State.update(state.article, payload.article);
 
       // Generate key points from the article
-      const keyPointsResponse = yield* components
+      const keyPoints = yield* components
         .KeyPoints({
           article: payload.article,
         })
         .pipe(Effect.andThen(Fiber.join));
 
-      if (!keyPointsResponse) {
+      if (!keyPoints) {
         return;
       }
 
-      yield* State.update(state.keyPoints, () => keyPointsResponse.keyPoints);
+      yield* State.update(state.keyPoints, () => keyPoints);
 
       // Spawn components for each selected social media platform
       const postComponents = pipe(
@@ -237,19 +278,19 @@ export const SocialMediaGenerator = SocialMediaGeneratorSetup.build(
           payload.twitter
             ? yield* components.TwitterPost({
                 site: "twitter",
-                keyPoints: keyPointsResponse.keyPoints,
+                keyPoints,
               })
             : null,
           payload.facebook
             ? yield* components.FacebookPost({
                 site: "facebook",
-                keyPoints: keyPointsResponse.keyPoints,
+                keyPoints,
               })
             : null,
           payload.instagram
             ? yield* components.InstagramPost({
                 site: "instagram",
-                keyPoints: keyPointsResponse.keyPoints,
+                keyPoints,
               })
             : null,
         ],
@@ -260,6 +301,7 @@ export const SocialMediaGenerator = SocialMediaGeneratorSetup.build(
       // You could call an API here to send the posts to your backend
       console.log("TU SAM");
       const posts = yield* Fiber.joinAll(postComponents);
+      console.log(posts);
     })
 );
 

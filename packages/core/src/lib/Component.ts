@@ -259,15 +259,22 @@ export type GetComponentTreeType<T extends AnyComponent> =
           : never;
     }[keyof GetComponentSetupConfig<T["setup"]>["components"]];
 
-export type GetComponentType<T extends AnyComponent> = Simplify<{
-  name: T["setup"]["name"];
-  id: string;
-  parentId: string | null;
-  status: "running" | "completed" | "failed";
-  state: GetComponentStateType<T["setup"]>;
-  endpoints: GetComponentEndpointsType<T["setup"]>;
-  components: GetComponentComponentsType<T["setup"]>;
-}>;
+export type GetComponentType<T extends AnyComponent> =
+  | Simplify<{
+      name: T["setup"]["name"];
+      id: string;
+      parentId: string | null;
+      status: "running" | "completed" | "failed";
+      state: GetComponentStateType<T["setup"]>;
+      endpoints: GetComponentEndpointsType<T["setup"]>;
+      components: GetComponentComponentsType<T["setup"]>;
+    }>
+  | {
+      name: T["setup"]["name"];
+      id: string;
+      parentId: string | null;
+      status: "forbidden";
+    };
 
 export type GetComponentSetupConfig<T> =
   T extends ComponentSetup<any, infer C> ? C : never;
@@ -307,3 +314,30 @@ export type GetComponentComponentsType<T extends AnyComponentSetup> = Simplify<{
         >[]
       : never;
 }>;
+
+export type GetAppComponentsPayloads<T extends AnyComponent> =
+  | GetAppComponentPayload<T>
+  | {
+      [K in keyof GetComponentSetupConfig<
+        T["setup"]
+      >["components"]]: GetComponentSetupConfig<
+        T["setup"]
+      >["components"][K] extends AnyComponent
+        ? GetAppComponentsPayloads<
+            GetComponentSetupConfig<T["setup"]>["components"][K]
+          >
+        : GetComponentSetupConfig<
+              T["setup"]
+            >["components"][K] extends AnyComponentList
+          ? GetAppComponentsPayloads<
+              GetComponentListComponent<
+                GetComponentSetupConfig<T["setup"]>["components"][K]
+              >
+            >
+          : never;
+    }[keyof GetComponentSetupConfig<T["setup"]>["components"]];
+
+export type GetAppComponentPayload<T extends AnyComponent> = {
+  name: T["setup"]["name"];
+  payload: Parameters<T["mount"]>[0];
+};

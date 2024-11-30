@@ -9,7 +9,7 @@ import {
   Record,
 } from "effect";
 import { Persistence, PersistenceService } from "../Persistence.js";
-import type { AppContextState } from "./RuntimeContextState.js";
+import type { AppContextState } from "./AppContextState.js";
 import { endpointIdToUrl } from "../Endpoint.js";
 
 export interface EndpointMountInfo {

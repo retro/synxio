@@ -17,7 +17,7 @@ import {
   makeAppContextState,
   type ComponentState,
   type AppContextState,
-} from "./AppContext/RuntimeContextState.js";
+} from "./AppContext/AppContextState.js";
 import {
   openEndpoint,
   type EndpointMountInfo,
@@ -80,11 +80,15 @@ export class AppContextService {
             })
           );
 
-          yield* runtimeContextService.registerComponent(mountInfo, {
-            id: componentContextService.id,
-            name: component.setup.name,
-            state,
-          });
+          yield* runtimeContextService.registerComponent(
+            mountInfo,
+            {
+              id: componentContextService.id,
+              name: component.setup.name,
+              state,
+            },
+            payload
+          );
 
           return yield* pipe(
             componentMountEffect,
@@ -107,7 +111,8 @@ export class AppContextService {
 
   registerComponent(
     mountInfo: ComponentMountInfo,
-    { id, state, name }: Pick<ComponentState, "id" | "state" | "name">
+    { id, state, name }: Pick<ComponentState, "id" | "state" | "name">,
+    payload: any
   ) {
     const parentId = mountInfo.type === "root" ? null : mountInfo.parentId;
     const componentState: ComponentState = {
@@ -122,6 +127,11 @@ export class AppContextService {
 
     return Ref.update(this.state, (state) =>
       Struct.evolve(state, {
+        componentsMetadata: (componentsMetadata) =>
+          Record.set(componentsMetadata, id, {
+            generation: 0,
+            payload,
+          }),
         components: (components) => {
           const withRegisteredComponent = Record.set(
             components,

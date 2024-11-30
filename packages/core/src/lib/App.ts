@@ -9,28 +9,38 @@ import {
   Take,
   Chunk,
   Scope,
+  Record,
 } from "effect";
-import type { AnyComponent } from "./Component.js";
+import type { AnyComponent, GetAppComponentsPayloads } from "./Component.js";
 import { AppContext, AppContextService } from "./AppContext.js";
 import { Persistence, PersistenceService } from "./Persistence.js";
-import { AppContextState } from "./AppContext/RuntimeContextState.js";
-import * as jsonPatchFormatter from "jsondiffpatch/formatters/jsonpatch";
+import {
+  AppContextState,
+  ComponentState,
+  ComponentStateForbidden,
+} from "./AppContext/AppContextState.js";
 import * as jsondiffpatch from "jsondiffpatch";
+import { diff_match_patch } from "@dmsnell/diff-match-patch";
 
 const jsondiffpatchInstance = jsondiffpatch.create({
   arrays: {
     detectMove: true,
   },
+  propertyFilter: (_name, context) => {
+    return context.left !== context.right;
+  },
+  // @ts-expect-error Original version breaks with surrogate pairs, this is a workaround
+  textDiff: { diffMatchPatch: diff_match_patch },
 });
 
 export type StateUpdate =
   | {
       type: "state";
-      value: AppContextState["components"];
+      value: Record<string, ComponentState | ComponentStateForbidden>;
     }
   | {
       type: "patch";
-      value: jsonPatchFormatter.Op[];
+      value: jsondiffpatch.Delta;
     };
 
 export type CallEndpointResult =
@@ -49,6 +59,7 @@ export type InitializeOrResumePayload<TInitializePayload> =
 function initializeOrResume<TRootComponent extends AnyComponent>(
   appId: string,
   rootComponent: TRootComponent,
+  authorizer: AppAuthorizer<any> | undefined,
   payload: InitializeOrResumePayload<Parameters<TRootComponent["mount"]>[0]>
 ) {
   const program = Effect.gen(function* () {
@@ -56,7 +67,7 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
     const scope = yield* Scope.make();
     //const runSync = EffectRuntime.runSync(yield* Effect.runtime());
 
-    const runtimeContextService = yield* AppContextService.make(appId).pipe(
+    const appContextService = yield* AppContextService.make(appId).pipe(
       Effect.provideService(Scope.Scope, scope)
     );
 
@@ -77,20 +88,63 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
     }).pipe(Effect.catchTag("NoSuchElementException", Effect.die));
 
     const changesPubSub = yield* pipe(
-      runtimeContextService.state.changes,
+      appContextService.state.changes,
       Stream.map((value) => value.components),
       Stream.changes,
-      Stream.debounce(10),
-      Stream.toPubSub({ strategy: "dropping", capacity: 1 }),
+      Stream.debounce(20),
+      Stream.toPubSub({ strategy: "sliding", capacity: 1 }),
       Effect.provideService(Scope.Scope, scope)
     );
+
+    const authorizeComponentTree = (
+      userAuthPayload: any,
+      components: AppContextState["components"]
+    ) =>
+      Effect.gen(function* () {
+        if (!authorizer) {
+          return components;
+        }
+        return yield* pipe(
+          components,
+          Record.toEntries,
+          Effect.forEach(([id, component]) =>
+            Effect.gen(function* () {
+              const appContextState = yield* Ref.get(appContextService.state);
+              const metadata = yield* Record.get(
+                appContextState.componentsMetadata,
+                id
+              );
+
+              const isAuthorized = yield* authorizer(userAuthPayload, {
+                name: component.name,
+                payload: metadata.payload,
+              });
+
+              console.log(isAuthorized);
+
+              return [
+                id,
+                isAuthorized
+                  ? component
+                  : {
+                      name: component.name,
+                      id: component.id,
+                      parentId: component.parentId,
+                      status: "forbidden" as const,
+                    },
+              ] as const;
+            })
+          ),
+          Effect.andThen(Record.fromEntries)
+        );
+      });
 
     yield* Effect.forkDaemon(
       pipe(
         Effect.gen(function* () {
           const scope = yield* Effect.scope;
           const fiber = yield* pipe(
-            runtimeContextService.mountComponent<TRootComponent>(
+            appContextService.mountComponent<TRootComponent>(
               scope,
               rootComponent,
               {
@@ -100,7 +154,7 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
               initialPayload
             ),
             Effect.provideService(Persistence, persistence),
-            Effect.provideService(AppContext, runtimeContextService)
+            Effect.provideService(AppContext, appContextService)
           );
           return yield* fiber;
         }),
@@ -112,13 +166,13 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
 
     return {
       callEndpoint: (
+        userAuthPayload: any,
         id: string,
         payload: unknown
       ): Promise<CallEndpointResult> =>
         runPromise(
           Effect.gen(function* () {
-            const endpoint =
-              yield* runtimeContextService.getEndpointCallback(id);
+            const endpoint = yield* appContextService.getEndpointCallback(id);
             if (endpoint) {
               yield* endpoint(payload);
               return { type: "success" };
@@ -126,11 +180,13 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
             return { type: "error", error: "Endpoint not found" };
           })
         ),
-      subscribe: (cb: (stateUpdate: StateUpdate) => void) =>
+      subscribe: (
+        userAuthPayload: any,
+        cb: (stateUpdate: StateUpdate) => void
+      ) =>
         runPromise(
           Effect.gen(function* () {
-            console.log(yield* Ref.get(runtimeContextService.state));
-            const initialState = (yield* Ref.get(runtimeContextService.state))
+            const initialState = (yield* Ref.get(appContextService.state))
               .components;
 
             const stateUpdatesStreamFiber = yield* pipe(
@@ -146,7 +202,9 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
                   onEnd: () => Option.none(),
                 })
               ),
-              // TODO: here we should cleanup the component tree based on the authorization
+              Stream.mapEffect((value) =>
+                authorizeComponentTree(userAuthPayload, value)
+              ),
               Stream.zipWithPrevious,
               Stream.map(([previous, current]) =>
                 Option.match(previous, {
@@ -155,14 +213,9 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
                     value: current,
                   }),
                   onSome: (previous) => {
-                    const patch = jsondiffpatchInstance.diff(previous, current);
-                    const formattedPatch = jsonPatchFormatter.format(
-                      patch,
-                      previous
-                    );
                     return {
                       type: "patch" as const,
-                      value: formattedPatch,
+                      value: jsondiffpatchInstance.diff(previous, current),
                     };
                   },
                 })
@@ -181,25 +234,44 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
   return program;
 }
 
-export class App<TRootComponent extends AnyComponent> {
-  static build<TRootComponent extends AnyComponent>(
-    rootComponent: TRootComponent
-  ) {
-    return new App<TRootComponent>(rootComponent);
+export class App<
+  TRootComponent extends AnyComponent,
+  TAuthorizer extends AppAuthorizer<TRootComponent>,
+> {
+  static build<
+    TRootComponent extends AnyComponent,
+    TAuthorizer extends AppAuthorizer<TRootComponent>,
+  >(rootComponent: TRootComponent, authorizer?: TAuthorizer) {
+    return new App<TRootComponent, TAuthorizer>(rootComponent, authorizer);
   }
-  private constructor(readonly rootComponent: TRootComponent) {}
+  private constructor(
+    readonly rootComponent: TRootComponent,
+    readonly authorizer?: AppAuthorizer<TRootComponent>
+  ) {}
+
   initialize(appId: string, payload: Parameters<TRootComponent["mount"]>[0]) {
-    return initializeOrResume(appId, this.rootComponent, {
+    return initializeOrResume(appId, this.rootComponent, this.authorizer, {
       type: "initialize",
       payload,
     });
   }
   resume(appId: string) {
-    return initializeOrResume(appId, this.rootComponent, {
+    return initializeOrResume(appId, this.rootComponent, this.authorizer, {
       type: "resume",
     });
   }
 }
 
-export type AnyApp = App<AnyComponent>;
-export type GetAppRootComponent<T> = T extends App<infer U> ? U : never;
+export type AppAuthorizer<TRootComponent extends AnyComponent> = (
+  userPayload: any,
+  component: GetAppComponentsPayloads<TRootComponent>
+) => Effect.Effect<boolean>;
+
+export type AnyApp = App<AnyComponent, any>;
+export type GetAppRootComponent<T> = T extends App<infer U, any> ? U : never;
+export type GetAppAuthorizerUserPayload<T> =
+  T extends App<any, infer V>
+    ? undefined extends V
+      ? any
+      : Parameters<V>[0]
+    : never;
