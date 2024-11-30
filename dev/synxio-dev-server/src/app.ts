@@ -1,4 +1,4 @@
-import { Effect, pipe, Schema, Fiber, Array } from "effect";
+import { Effect, pipe, Schema, Fiber, Array, Stream } from "effect";
 import { Component, State, Endpoint, Api, type GetAppType } from "@repo/core";
 import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod.mjs";
@@ -22,7 +22,6 @@ const Post = Component.setup("Post", {
     ),
   },
   state: {
-    messages: State.make<OpenAI.ChatCompletionMessageParam[]>(() => []),
     post: State.make<string | null>(() => null),
     isLoading: State.make<boolean>(() => false),
   },
@@ -33,6 +32,8 @@ const Post = Component.setup("Post", {
     payload: { site: "instagram" | "facebook" | "twitter"; keyPoints: string[] }
   ) =>
     Effect.gen(function* () {
+      // Define the messages to send to the OpenAI API. We don't need to store them
+      // in the DB, IO is durable, and messages can be recomputed as needed
       const messages: OpenAI.ChatCompletionMessageParam[] = [
         {
           role: "system",
@@ -52,9 +53,12 @@ Write a ${payload.site} post for the following key points:
 
       let idx = 0;
 
+      // Chat loop
       while (true) {
+        // Show loading indicator, state is streamed to the frontend
         yield* State.update(state.isLoading, true);
 
+        // Call the OpenAI API with the current messages and get the new post
         const completion = yield* Api.io(
           `post-${idx}`,
           pipe(
@@ -76,21 +80,24 @@ Write a ${payload.site} post for the following key points:
           content: value.content,
         });
 
-        yield* State.update(state.messages, [...messages]);
         yield* State.update(state.post, value.content);
 
+        // Open two endpoints - one for the user to send a message, and one for
+        // the user approval
         const message = yield* endpoints.message(`message-${idx}`);
         const approval = yield* endpoints.approval(`approval-${idx}`);
 
+        // Wait for either message or approval to complete
         const result = yield* Effect.race(message.value, approval.value);
 
+        // If the user approved the post, return the post
         if (result.kind === "approval") {
           return { site: payload.site, post: value.content };
         }
 
+        // Push the user's message to the messages array and continue
+        // the chat loop
         messages.push({ role: "user", content: result.content });
-
-        yield* State.update(state.messages, [...messages]);
 
         idx++;
       }
@@ -125,7 +132,9 @@ const KeyPoints = Component.setup("KeyPoints", {
 }).build((_api, payload: { article: string }) =>
   Effect.gen(function* () {
     let run = 0;
+    // Retry 5 times
     while (run < 5) {
+      // Call the OpenAI API with the article and get the key points
       const completion = yield* Api.io(
         "key-points",
         pipe(
@@ -182,16 +191,7 @@ Write a list of key points from the following article
 
 const SocialMediaGeneratorSetup = Component.setup("SocialMediaGenerator", {
   // Endpoints allow us to communicate with the outside world
-  endpoints: {
-    initialPayload: Endpoint.make(
-      Schema.Struct({
-        article: Schema.String,
-        twitter: Schema.Boolean,
-        facebook: Schema.Boolean,
-        instagram: Schema.Boolean,
-      })
-    ),
-  },
+  endpoints: {},
   // State is streamed to the frontend
   state: {
     keyPoints: State.make<string[]>(() => []),
@@ -206,17 +206,22 @@ const SocialMediaGeneratorSetup = Component.setup("SocialMediaGenerator", {
 });
 
 export const SocialMediaGenerator = SocialMediaGeneratorSetup.build(
-  ({ components, state, endpoints }, _payload: {}) =>
+  (
+    { components, state },
+    payload: {
+      article: string;
+      twitter: boolean;
+      facebook: boolean;
+      instagram: boolean;
+    }
+  ) =>
     Effect.gen(function* () {
-      const initialPayload = yield* endpoints
-        .initialPayload("initialPayload")
-        .pipe(Effect.andThen(({ value }) => value));
+      yield* State.update(state.article, payload.article);
 
-      yield* State.update(state.article, initialPayload.article);
-
+      // Generate key points from the article
       const keyPointsResponse = yield* components
         .KeyPoints({
-          article: initialPayload.article,
+          article: payload.article,
         })
         .pipe(Effect.andThen(Fiber.join));
 
@@ -226,21 +231,22 @@ export const SocialMediaGenerator = SocialMediaGeneratorSetup.build(
 
       yield* State.update(state.keyPoints, () => keyPointsResponse.keyPoints);
 
+      // Spawn components for each selected social media platform
       const postComponents = pipe(
         [
-          initialPayload.twitter
+          payload.twitter
             ? yield* components.TwitterPost({
                 site: "twitter",
                 keyPoints: keyPointsResponse.keyPoints,
               })
             : null,
-          initialPayload.facebook
+          payload.facebook
             ? yield* components.FacebookPost({
                 site: "facebook",
                 keyPoints: keyPointsResponse.keyPoints,
               })
             : null,
-          initialPayload.instagram
+          payload.instagram
             ? yield* components.InstagramPost({
                 site: "instagram",
                 keyPoints: keyPointsResponse.keyPoints,
@@ -250,6 +256,9 @@ export const SocialMediaGenerator = SocialMediaGeneratorSetup.build(
         Array.filter((component) => component !== null)
       );
 
+      // Wait for all components to complete - workflow is done
+      // You could call an API here to send the posts to your backend
+      console.log("TU SAM");
       const posts = yield* Fiber.joinAll(postComponents);
     })
 );

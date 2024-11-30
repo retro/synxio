@@ -18,11 +18,12 @@ export interface ComponentState {
   components: Record<string, string | string[]>;
 }
 
-export interface RuntimeContextState {
+export interface AppContextState {
+  appId: string;
   openEndpoints: Record<string, OpenEndpoint>;
   components: Record<string, ComponentState>;
 }
 
-export function makeRuntimeContextState(): RuntimeContextState {
-  return { openEndpoints: {}, components: {} };
+export function makeAppContextState(appId: string): AppContextState {
+  return { appId, openEndpoints: {}, components: {} };
 }

@@ -1,34 +1,51 @@
-import React, { useMemo, useEffect } from "react";
+import React, { useMemo, useEffect, useCallback } from "react";
 import { atom, createStore, useAtom, Provider, useAtomValue } from "jotai";
 import invariant from "tiny-invariant";
 import { App } from "@repo/synxio-dev-server/app";
 import { immutableJSONPatch } from "immutable-json-patch";
+import { AnyEndpointRef, GetEndpointRefValueType } from "@repo/core";
 
 export function makeSynxioApp<
-  T extends { rootName: string; components: any },
+  T extends { rootName: string; components: Record<string, any> },
 >() {
-  const synxioValue = atom<T["components"] | null>(null);
+  const synxioValue = atom<{
+    components: T["components"];
+    appId: string;
+  } | null>(null);
 
-  const SynxioProvider = (props: { children: React.ReactNode }) => {
+  const SynxioProvider = (props: {
+    children: React.ReactNode;
+    appId: string;
+  }) => {
     const synxioStore = useMemo(() => {
       const store = createStore();
-      store.set(synxioValue, null);
+      store.set(synxioValue, {
+        appId: props.appId,
+        components: {},
+      });
       return store;
     }, []);
 
     useEffect(() => {
-      const socket = new WebSocket("ws://localhost:3000/api/ws");
+      const socket = new WebSocket(`ws://localhost:3000/api/${props.appId}/ws`);
       socket.onmessage = (event) => {
         const { type, value } = JSON.parse(event.data);
         if (type === "state") {
-          synxioStore.set(synxioValue, value);
+          synxioStore.set(synxioValue, {
+            appId: props.appId,
+            components: value,
+          });
         } else if (type === "patch") {
-          const currentValue = synxioStore.get(synxioValue);
-          if (currentValue) {
-            synxioStore.set(
-              synxioValue,
-              immutableJSONPatch(currentValue, value)
-            );
+          const currentComponents = synxioStore.get(synxioValue)?.components;
+          if (currentComponents) {
+            const newValue = immutableJSONPatch(
+              currentComponents,
+              value
+            ) as Record<string, any>;
+            synxioStore.set(synxioValue, {
+              appId: props.appId,
+              components: newValue,
+            });
           }
         }
       };
@@ -47,12 +64,16 @@ export function makeSynxioApp<
       () =>
         atom<T["components"] | null>((get) => {
           const value = get(synxioValue);
+
           if (!value) {
             return null;
           }
+
+          const components = value.components;
+
           return id
-            ? value[id]
-            : Object.values(value).filter(
+            ? components[id]
+            : Object.values(components).filter(
                 (component) => component.name === componentName
               )[0];
         }),
@@ -68,6 +89,34 @@ export function makeSynxioApp<
     invariant(componentValue, `Component ${componentName} not found`);
 
     return componentValue as Extract<T["components"], { name: TComponentName }>;
+  };
+
+  const useSynxioCallEndpoint = <T extends AnyEndpointRef>(endpointRef: T) => {
+    const appId = useAtomValue(synxioValue)?.appId;
+
+    invariant(
+      appId,
+      "useSynxioCallEndpoint should be used within <Synxio.Provider>"
+    );
+
+    const callback = useCallback(
+      (payload: GetEndpointRefValueType<T>) => {
+        return fetch(
+          `http://localhost:3000/api/${appId}/endpoints/${endpointRef}`,
+          {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          }
+        );
+      },
+      [appId, endpointRef]
+    );
+
+    return callback;
   };
 
   const SynxioComponent = <TComponentName extends T["components"]["name"]>({
@@ -113,7 +162,9 @@ export function makeSynxioApp<
       Component: SynxioComponent,
     },
     useSynxio,
+    useSynxioCallEndpoint,
   };
 }
 
-export const { Synxio, useSynxio } = makeSynxioApp<App>();
+export const { Synxio, useSynxio, useSynxioCallEndpoint } =
+  makeSynxioApp<App>();

@@ -1,140 +1,124 @@
+import { Effect } from "effect";
 import {
-  Effect,
-  pipe,
-  Stream,
-  Runtime as EffectRuntime,
-  Ref,
-  Fiber,
-} from "effect";
-import { Runtime, type RuntimeContextState } from "@repo/core";
-import * as jsondiffpatch from "jsondiffpatch";
-import * as jsonPatchFormatter from "jsondiffpatch/formatters/jsonpatch";
+  CallEndpointResult,
+  App,
+  StateUpdate,
+  GetAppRootComponent,
+} from "@repo/core";
 import express from "express";
 import http from "http";
 import * as ptr from "path-to-regexp";
-import { WebSocketServer, WebSocket } from "ws";
+import { WebSocketServer } from "ws";
 import { SocialMediaGenerator } from "./app.js";
 import cors from "cors";
+import { randomUUID } from "crypto";
 
-function makeChangesStreamPatcher() {
-  let lastValue: null | RuntimeContextState["components"] = null;
-  const jsondiffpatchInstance = jsondiffpatch.create({
-    arrays: {
-      detectMove: true,
-    },
-  });
-  return (value: RuntimeContextState) => {
-    const components = value.components;
-    if (components === lastValue) {
-      return { value, patch: null };
+type ServableAppInitializeOrResumeResult = {
+  callEndpoint: (id: string, payload: any) => Promise<CallEndpointResult>;
+  subscribe: (cb: (stateUpdate: StateUpdate) => void) => Promise<() => void>;
+};
+
+type ServableApp = {
+  initialize: (
+    appId: string,
+    payload: any
+  ) => Effect.Effect<ServableAppInitializeOrResumeResult>;
+  resume: (appId: string) => Effect.Effect<ServableAppInitializeOrResumeResult>;
+};
+
+class AppServer<TApp extends ServableApp> {
+  static make<TApp extends ServableApp>(app: TApp) {
+    return new AppServer<TApp>(app);
+  }
+
+  private readonly apps: Map<string, ServableAppInitializeOrResumeResult> =
+    new Map();
+
+  constructor(private readonly app: TApp) {}
+
+  private async getApp(appId: string) {
+    const app = this.apps.get(appId);
+    if (app) {
+      return app;
     }
-    const patch = jsondiffpatchInstance.diff(lastValue, components);
-    const formattedPatch = jsonPatchFormatter.format(patch, lastValue);
-    lastValue = components;
-    return { value, patch: formattedPatch };
-  };
+
+    const resumedApp = await Effect.runPromise(this.app.resume(appId));
+    this.apps.set(appId, resumedApp);
+    return resumedApp;
+  }
+
+  async initialize(
+    appId: string,
+    payload: Parameters<GetAppRootComponent<TApp>["mount"]>[0]
+  ) {
+    const app = await Effect.runPromise(this.app.initialize(appId, payload));
+    this.apps.set(appId, app);
+    return app;
+  }
+
+  async callEndpoint(appId: string, id: string, payload: unknown) {
+    const app = await this.getApp(appId);
+    return await app.callEndpoint(id, payload);
+  }
+  async subscribe(appId: string, cb: (stateUpdate: StateUpdate) => void) {
+    const app = await this.getApp(appId);
+    return await app.subscribe(cb);
+  }
 }
 
-function wsMessage(type: "state" | "patch", value: unknown) {
-  return JSON.stringify({ type, value });
-}
+const appServer = AppServer.make(App.build(SocialMediaGenerator));
 
-const program = Effect.gen(function* () {
-  const semaphore = yield* Effect.makeSemaphore(1);
-  const state = yield* Ref.make<null | RuntimeContextState["components"]>(null);
-  const websockets = new Set<WebSocket>();
+const app = express();
+app.use(express.json());
+app.use(cors());
 
-  const streamPatcher = makeChangesStreamPatcher();
-  const { run, context } = yield* Runtime.build(
-    SocialMediaGenerator
-  ).initialize({});
+app.post("/api/initialize", async (req, res) => {
+  const payload = req.body;
+  const appId = randomUUID();
 
-  const runningFiber = yield* Effect.forkDaemon(run);
+  await appServer.initialize(appId, payload);
 
-  const streamFiber = yield* Effect.forkDaemon(
-    pipe(
-      context.state.changes,
-      Stream.debounce(10),
-      Stream.map(streamPatcher),
-      Stream.runForEach(({ value, patch }) =>
-        semaphore.withPermits(1)(
-          Effect.gen(function* () {
-            yield* Ref.set(state, value["components"]);
-            if (patch) {
-              for (const ws of websockets) {
-                ws.send(wsMessage("patch", patch));
-              }
-            }
-          })
-        )
-      )
-    )
-  );
-
-  const runPromise = EffectRuntime.runPromise(yield* Effect.runtime());
-  const runSync = EffectRuntime.runSync(yield* Effect.runtime());
-
-  const app = express();
-  app.use(express.json());
-  app.use(cors());
-
-  app.post("/api/endpoints/:id", (req, res) => {
-    const id = req.params.id;
-    const value = req.body;
-    runPromise(
-      Effect.gen(function* () {
-        const endpoint = yield* context.getEndpointCallback(id);
-        if (endpoint) {
-          yield* endpoint(value);
-          return res.send("ok");
-        }
-        res.status(404);
-        return res.send("Endpoint not found");
-      })
-    );
+  res.json({
+    appId,
   });
+});
 
-  const server = http.createServer(app);
-  const socketPathMatcher = ptr.match("/api/ws");
-  const wss = new WebSocketServer({ noServer: true });
+app.post("/api/:appId/endpoints/:id", async (req, res) => {
+  const { id, appId } = req.params;
+  const value = req.body;
+  const result = await appServer.callEndpoint(appId, id, value);
+  if (result.type === "success") {
+    res.send("ok");
+  } else {
+    res.status(400);
+    res.send(result.error);
+  }
+});
 
-  wss.on("connection", (ws) => {
-    runSync(
-      semaphore.withPermits(1)(
-        Effect.gen(function* () {
-          const currentState = yield* Ref.get(state);
-          if (currentState) {
-            ws.send(wsMessage("state", currentState));
-          }
-          websockets.add(ws);
-          ws.on("close", () => {
-            websockets.delete(ws);
-          });
-        })
-      )
-    );
-  });
+const server = http.createServer(app);
+const socketPathMatcher = ptr.match("/api/:appId/ws");
+const wss = new WebSocketServer({ noServer: true });
 
-  server.on("upgrade", (req, socket, head) => {
-    const { pathname } = new URL(req.url!, "wss://base.url");
-    const match = socketPathMatcher(pathname);
-    if (match) {
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        wss.emit("connection", ws, req);
+server.on("upgrade", (req, socket, head) => {
+  const { pathname } = new URL(req.url!, "wss://base.url");
+  const match = socketPathMatcher(pathname);
+  const appId = match ? match?.params.appId : null;
+  if (typeof appId === "string") {
+    wss.handleUpgrade(req, socket, head, async (ws) => {
+      const unsubscribe = await appServer.subscribe(appId, (stateUpdate) => {
+        ws.send(JSON.stringify(stateUpdate));
       });
-    } else {
-      socket.destroy();
-    }
-  });
+      ws.on("close", () => {
+        unsubscribe();
+      });
 
-  server.listen(3000, () => {
-    console.log("Server listening on port 3000!");
-  });
+      wss.emit("connection", ws, req);
+    });
+  } else {
+    socket.destroy();
+  }
+});
 
-  yield* Fiber.join(streamFiber);
-}).pipe(Effect.scoped);
-
-Effect.runPromise(program).then(
-  (value) => console.log("FINAL", value),
-  (error) => console.error(error)
-);
+server.listen(3000, () => {
+  console.log("Server listening on port 3000!");
+});

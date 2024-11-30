@@ -14,14 +14,14 @@ import {
   FiberMap,
 } from "effect";
 import {
-  makeRuntimeContextState,
+  makeAppContextState,
   type ComponentState,
-  type RuntimeContextState,
-} from "./RuntimeContext/RuntimeContextState.js";
+  type AppContextState,
+} from "./AppContext/RuntimeContextState.js";
 import {
   openEndpoint,
   type EndpointMountInfo,
-} from "./RuntimeContext/OpenEndpoint.js";
+} from "./AppContext/OpenEndpoint.js";
 import type { AnyComponent, GetComponentPayload } from "./Component.js";
 import {
   ComponentContext,
@@ -30,16 +30,16 @@ import {
   type ComponentMountInfo,
 } from "./ComponentContext.js";
 
-export class RuntimeContextService {
-  static make() {
+export class AppContextService {
+  static make(appId: string) {
     return Effect.gen(function* () {
       const componentFibers = yield* FiberMap.make<string>();
-      const state = yield* SubscriptionRef.make(makeRuntimeContextState());
-      return new RuntimeContextService(state, componentFibers);
+      const state = yield* SubscriptionRef.make(makeAppContextState(appId));
+      return new AppContextService(state, componentFibers);
     });
   }
   constructor(
-    readonly state: SubscriptionRef.SubscriptionRef<RuntimeContextState>,
+    readonly state: SubscriptionRef.SubscriptionRef<AppContextState>,
     private readonly componentFibers: FiberMap.FiberMap<string>
   ) {}
   mountComponent<TComponent extends AnyComponent>(
@@ -289,7 +289,7 @@ export class RuntimeContextService {
   }
 }
 
-export class RuntimeContext extends Context.Tag("@synxio/RuntimeContext")<
-  RuntimeContext,
-  InstanceType<typeof RuntimeContextService>
+export class AppContext extends Context.Tag("@synxio/AppContext")<
+  AppContext,
+  InstanceType<typeof AppContextService>
 >() {}

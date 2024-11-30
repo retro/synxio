@@ -1,5 +1,5 @@
 import { Context, Effect, pipe, Schema, Option, Scope } from "effect";
-import { RuntimeContext } from "./RuntimeContext.js";
+import { AppContext } from "./AppContext.js";
 import { Persistence } from "./Persistence.js";
 import type { AnyComponent, GetComponentPayload } from "./Component.js";
 import { endpointIdToUrl } from "./Endpoint.js";
@@ -68,7 +68,7 @@ export class ComponentContextService {
     schema: Schema.Schema<any, any, never>
   ) {
     return Effect.gen(this, function* () {
-      const runtimeContext = yield* RuntimeContext;
+      const runtimeContext = yield* AppContext;
       const path = `endpoint:${this.path}/${mountedOnProperty}:${key}`;
       const id = hashString(path);
       const value = yield* runtimeContext.openEndpoint<T>(
@@ -90,13 +90,13 @@ export class ComponentContextService {
   }
   setState(newState: Record<string, unknown>) {
     return Effect.gen(this, function* () {
-      const runtimeContextService = yield* RuntimeContext;
+      const runtimeContextService = yield* AppContext;
       return yield* runtimeContextService.setComponentState(this.id, newState);
     });
   }
   getStateKeyValue(key: string) {
     return Effect.gen(this, function* () {
-      const runtimeContextService = yield* RuntimeContext;
+      const runtimeContextService = yield* AppContext;
       return yield* runtimeContextService.getComponentStateKeyValue(
         this.id,
         key
@@ -105,7 +105,7 @@ export class ComponentContextService {
   }
   updateAndGetStateKeyValue(key: string, updater: (value: unknown) => unknown) {
     return Effect.gen(this, function* () {
-      const runtimeContextService = yield* RuntimeContext;
+      const runtimeContextService = yield* AppContext;
       return yield* runtimeContextService.updateAndGetComponentStateKeyValue(
         this.id,
         key,
@@ -145,7 +145,7 @@ export class ComponentContextService {
     payload: GetComponentPayload<TComponent>
   ) {
     return Effect.gen(this, function* () {
-      const runtimeContextService = yield* RuntimeContext;
+      const runtimeContextService = yield* AppContext;
       return yield* runtimeContextService.mountComponent<TComponent>(
         this.scope,
         component,

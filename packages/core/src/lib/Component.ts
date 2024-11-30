@@ -1,4 +1,4 @@
-import { Context, Effect } from "effect";
+import { Context, Effect, Record } from "effect";
 import {
   type AnyEndpoint,
   type GetEndpointSchemaType,
@@ -145,33 +145,31 @@ export class ComponentSetup<
   }
   getInitialState() {
     const stateConfig = this.config.state;
-    return Object.fromEntries(
-      Object.entries(stateConfig).map(([key, value]) => [key, value.initFn()])
-    ) as Record<string, unknown>;
+    return Record.map(stateConfig, (value) => value.initFn()) as Record<
+      string,
+      unknown
+    >;
   }
   getLiveApi() {
     return Effect.gen(this, function* () {
-      const state = Object.fromEntries(
-        Object.entries(this.config.state).map(([key, value]) => [
-          key,
-          new StateInstance(key, value),
-        ])
-      ) as StateConfigToStateApi<TComponentConfig["state"]>;
+      const state = Record.mapEntries(this.config.state, (value, key) => [
+        key,
+        new StateInstance(key, value),
+      ]) as StateConfigToStateApi<TComponentConfig["state"]>;
 
-      const endpoints = Object.fromEntries(
-        Object.entries(this.config.endpoints).map(([key, value]) => [
-          key,
-          makeOpenEndpoint(value, key),
-        ])
+      const endpoints = Record.mapEntries(
+        this.config.endpoints,
+        (value, key) => [key, makeOpenEndpoint(value, key)]
       ) as EndpointsConfigToEndpointApi<TComponentConfig["endpoints"]>;
 
-      const components = Object.fromEntries(
-        Object.entries(this.config.components).map(([key, value]) => [
+      const components = Record.mapEntries(
+        this.config.components,
+        (value, key) => [
           key,
           value instanceof ComponentList
             ? makeComponentListMount(key, value)
             : makeComponentMount(key, value),
-        ])
+        ]
       ) as ComponentsConfigToComponentApi<TComponentConfig["components"]>;
 
       return { state, endpoints, components };
@@ -280,7 +278,13 @@ export type GetComponentStateType<T extends AnyComponentSetup> = Simplify<{
   >;
 }>;
 
-export type EndpointRef<_T> = string & { readonly _tag: unique symbol };
+export type EndpointRef<T> = string & {
+  readonly _tag: unique symbol;
+  readonly _type: T;
+};
+export type AnyEndpointRef = EndpointRef<any>;
+export type GetEndpointRefValueType<T> =
+  T extends EndpointRef<infer U> ? U : never;
 
 export type GetComponentEndpointsType<T extends AnyComponentSetup> = Simplify<{
   [TKey in keyof GetComponentSetupConfig<T>["endpoints"]]: EndpointRef<

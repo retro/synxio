@@ -9,7 +9,7 @@ import {
   Record,
 } from "effect";
 import { Persistence, PersistenceService } from "../Persistence.js";
-import type { RuntimeContextState } from "./RuntimeContextState.js";
+import type { AppContextState } from "./RuntimeContextState.js";
 import { endpointIdToUrl } from "../Endpoint.js";
 
 export interface EndpointMountInfo {
@@ -20,7 +20,7 @@ export interface EndpointMountInfo {
 
 function openAndRegisterEndpoint<T>(
   persistence: PersistenceService,
-  stateRef: Ref.Ref<RuntimeContextState>,
+  stateRef: Ref.Ref<AppContextState>,
   mountInfo: EndpointMountInfo,
   schema: Schema.Schema<any, any, never>
 ) {
@@ -32,6 +32,7 @@ function openAndRegisterEndpoint<T>(
       Effect.gen(function* () {
         const parsedValue: T = yield* decoder(value);
         yield* Deferred.succeed(deferred, parsedValue);
+        yield* Effect.yieldNow();
       });
 
     const registerEndpoint = Ref.update(stateRef, (state) =>
@@ -73,17 +74,19 @@ function openAndRegisterEndpoint<T>(
 
     yield* Effect.gen(function* () {
       yield* Effect.addFinalizer(() => deregisterEndpoint);
-      yield* deferred.pipe(
-        Effect.andThen((value) => persistence.set(mountInfo.id, value))
-      );
     }).pipe(Effect.forkScoped);
 
-    return deferred as Deferred.Deferred<T>;
+    return Effect.gen(function* () {
+      const value = yield* deferred;
+      yield* deregisterEndpoint;
+      yield* persistence.set(mountInfo.id, value);
+      return value;
+    });
   });
 }
 
 export function openEndpoint<T>(
-  stateRef: Ref.Ref<RuntimeContextState>,
+  stateRef: Ref.Ref<AppContextState>,
   mountInfo: EndpointMountInfo,
   schema: Schema.Schema<any, any, never>
 ) {

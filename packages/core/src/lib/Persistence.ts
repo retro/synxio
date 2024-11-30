@@ -3,23 +3,27 @@ import v8 from "node:v8";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 
 export class PersistenceService {
-  static makeLive() {
+  static makeLive(appId: string) {
     return Effect.gen(function* () {
       const sql = yield* SqliteClient.make({
-        filename: "./tmp/db.sqlite",
+        filename: `./tmp/db.sqlite`,
       });
 
       yield* sql`CREATE TABLE IF NOT EXISTS persistence (id TEXT PRIMARY KEY UNIQUE, data BLOB NOT NULL)`;
 
-      return new PersistenceService(sql);
+      return new PersistenceService(appId, sql);
     });
   }
 
-  constructor(readonly sql: SqliteClient.SqliteClient) {}
+  constructor(
+    readonly appId: string,
+    readonly sql: SqliteClient.SqliteClient
+  ) {}
   get(id: string) {
     return Effect.gen(this, function* () {
+      const fullId = `${this.appId}/${id}`;
       const result = yield* this
-        .sql`SELECT data FROM persistence WHERE id = ${id}`;
+        .sql`SELECT data FROM persistence WHERE id = ${fullId}`;
       const data = result[0]?.data;
 
       return pipe(
@@ -30,9 +34,10 @@ export class PersistenceService {
   }
   set(id: string, data: unknown) {
     return Effect.gen(this, function* () {
+      const fullId = `${this.appId}/${id}`;
       const serialized = new Uint8Array(v8.serialize(data));
       yield* this
-        .sql`INSERT OR REPLACE INTO persistence (id, data) VALUES (${id}, ${serialized})`;
+        .sql`INSERT OR REPLACE INTO persistence (id, data) VALUES (${fullId}, ${serialized})`;
     });
   }
 }

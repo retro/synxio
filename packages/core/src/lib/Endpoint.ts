@@ -28,5 +28,5 @@ export function makeOpenEndpoint<TEndpoint extends AnyEndpoint>(
 }
 
 export function endpointIdToUrl(id: string) {
-  return `api/endpoints/${id}`;
+  return id;
 }
