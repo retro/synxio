@@ -20,41 +20,50 @@ const jsondiffpatchInstance = jsondiffpatch.create({
   textDiff: { diffMatchPatch: diff_match_patch },
 });
 
-const userAuth = "editor";
-
 export function makeSynxioApp<
   T extends { rootName: string; components: Record<string, any> },
 >() {
   const synxioValue = atom<{
     components: T["components"];
     appId: string;
+    token: string;
   } | null>(null);
 
   const SynxioProvider = (props: {
     children: React.ReactNode;
     appId: string;
+    token: string;
   }) => {
     const initialStoreValue = {
       appId: props.appId,
       components: {},
+      token: props.token,
     };
     const synxioStore = useMemo(() => {
       const store = createStore();
-      store.set(synxioValue, initialStoreValue);
       return store;
     }, []);
 
     useEffect(() => {
-      console.log("CONNECTING TO WS", props.appId);
-      const socket = new WebSocket(
-        `ws://localhost:3000/api/${props.appId}/ws?token=${userAuth}`
+      console.log(
+        "CONNECTING TO WS",
+        props.appId,
+        `ws://localhost:3000/api/${props.appId}/ws?token=${props.token}`
       );
+
+      synxioStore.set(synxioValue, initialStoreValue);
+      const socket = new WebSocket(
+        `ws://localhost:3000/api/${props.appId}/ws?token=${props.token}`
+      );
+
       socket.onmessage = (event) => {
         const { type, value } = JSON.parse(event.data);
         if (type === "state") {
+          console.log("STATE", value);
           synxioStore.set(synxioValue, {
             appId: props.appId,
             components: value,
+            token: props.token,
           });
         } else if (type === "patch") {
           const currentStoreValue =
@@ -70,7 +79,7 @@ export function makeSynxioApp<
       return () => {
         socket.close();
       };
-    }, []);
+    }, [props.token]);
     return <Provider store={synxioStore}>{props.children}</Provider>;
   };
 
@@ -112,12 +121,14 @@ export function makeSynxioApp<
   const useSynxioCallEndpoint = <T extends AnyEndpointRef>(
     endpointRef: T | undefined
   ) => {
-    const appId = useAtomValue(synxioValue)?.appId;
+    const state = useAtomValue(synxioValue);
 
     invariant(
-      appId,
+      state,
       "useSynxioCallEndpoint should be used within <Synxio.Provider>"
     );
+
+    const { appId, token } = state;
 
     const callback = useMemo(() => {
       if (!endpointRef) {
@@ -125,7 +136,7 @@ export function makeSynxioApp<
       }
       return (payload: GetEndpointRefValueType<T>) => {
         return fetch(
-          `http://localhost:3000/api/${appId}/endpoints/${endpointRef}?token=${userAuth}`,
+          `http://localhost:3000/api/${appId}/endpoints/${endpointRef}?token=${token}`,
           {
             method: "POST",
             headers: {
@@ -136,7 +147,7 @@ export function makeSynxioApp<
           }
         );
       };
-    }, [appId, endpointRef]);
+    }, [appId, endpointRef, token]);
 
     return callback;
   };

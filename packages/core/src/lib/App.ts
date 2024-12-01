@@ -24,6 +24,7 @@ import {
 import * as jsondiffpatch from "jsondiffpatch";
 import { diff_match_patch } from "@dmsnell/diff-match-patch";
 import { NoSuchElementException } from "effect/Cause";
+import { randomUUID } from "crypto";
 
 const jsondiffpatchInstance = jsondiffpatch.create({
   arrays: {
@@ -101,6 +102,7 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
 
     // TODO: Add component generation to mix, so that we re-authorize components when they are re-mounted
     const authorizeComponent = (
+      sessionId: string,
       userAuthPayload: any,
       componentId: string
     ): Effect.Effect<boolean, NoSuchElementException> =>
@@ -121,6 +123,7 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
 
               const authorization = yield* pipe(
                 Record.get(appContextState.authorizations, componentId),
+                Option.flatMap((value) => Record.get(value, sessionId)),
                 Option.match({
                   onSome: (value) => Effect.succeed(value),
                   onNone: () =>
@@ -134,8 +137,24 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
               );
 
               return Struct.evolve(appContextState, {
-                authorizations: (authorizations) =>
-                  Record.set(authorizations, componentId, authorization),
+                authorizations: (authorizations) => {
+                  if (!Record.has(authorizations, componentId)) {
+                    return Record.set(authorizations, componentId, {
+                      [sessionId]: authorization,
+                    });
+                  }
+
+                  return Record.modify(
+                    authorizations,
+                    componentId,
+                    (componentAuthorizations) =>
+                      Record.set(
+                        componentAuthorizations,
+                        sessionId,
+                        authorization
+                      )
+                  );
+                },
               });
             })
         );
@@ -147,16 +166,16 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
 
         const parentId = componentState.parentId;
 
-        const componentAuthorization = yield* Record.get(
-          appContextState.authorizations,
-          componentId
+        const componentAuthorization = yield* pipe(
+          Record.get(appContextState.authorizations, componentId),
+          Option.flatMap((value) => Record.get(value, sessionId))
         );
 
         if (componentAuthorization && parentId === null) {
           return true;
         } else if (componentAuthorization && parentId !== null) {
           return yield* Effect.suspend(() =>
-            authorizeComponent(userAuthPayload, parentId)
+            authorizeComponent(sessionId, userAuthPayload, parentId)
           );
         }
 
@@ -164,6 +183,7 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
       });
 
     const authorizeComponentTree = (
+      sessionId: string,
       userAuthPayload: any,
       components: AppContextState["components"]
     ) =>
@@ -177,6 +197,7 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
           Effect.forEach(([componentId, component]) =>
             Effect.gen(function* () {
               const isAuthorized = yield* authorizeComponent(
+                sessionId,
                 userAuthPayload,
                 componentId
               );
@@ -245,6 +266,8 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
       ) =>
         runPromise(
           Effect.gen(function* () {
+            const sessionId = randomUUID();
+
             const initialState = (yield* Ref.get(appContextService.state))
               .components;
 
@@ -262,7 +285,7 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
                 })
               ),
               Stream.mapEffect((value) =>
-                authorizeComponentTree(userAuthPayload, value)
+                authorizeComponentTree(sessionId, userAuthPayload, value)
               ),
               Stream.zipWithPrevious,
               Stream.map(([previous, current]) =>

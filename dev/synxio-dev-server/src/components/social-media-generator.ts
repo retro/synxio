@@ -82,6 +82,5 @@ export const SocialMediaGenerator = SocialMediaGeneratorSetup.build(
       // You could call an API here to send the posts to your backend
 
       const posts = yield* Fiber.joinAll(postComponents);
-      console.log(posts);
     })
 );

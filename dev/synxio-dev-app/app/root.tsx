@@ -9,7 +9,18 @@ import {
 
 import type { Route } from "./+types/root";
 import "./app.css";
-import { Synxio } from "./lib/synxio";
+import { useAtom } from "jotai";
+import { roleAtom } from "./role";
+
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
 
 export const links: Route.LinksFunction = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -43,7 +54,32 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  return <Outlet />;
+  const [role, setRole] = useAtom(roleAtom);
+  return (
+    <>
+      <div className="border-b py-4 flex">
+        <div className="max-w-2xl mx-auto">
+          <Select value={role} onValueChange={setRole}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Select a role" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectLabel>Roles</SelectLabel>
+                <SelectItem value="editor">Editor</SelectItem>
+                <SelectItem value="twitterEditor">Twitter Editor</SelectItem>
+                <SelectItem value="facebookEditor">Facebook Editor</SelectItem>
+                <SelectItem value="instagramEditor">
+                  Instagram Editor
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <Outlet />
+    </>
+  );
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {

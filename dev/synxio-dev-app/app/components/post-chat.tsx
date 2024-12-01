@@ -20,7 +20,7 @@ import { z } from "zod";
 import { Textarea } from "./ui/textarea";
 import { Spinner } from "./spinner";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { Bot, Sparkles, User } from "lucide-react";
+import { Bot, User } from "lucide-react";
 
 function ChatMessageContent({
   site,
@@ -192,7 +192,7 @@ function PostChatForm({
   );
 }
 
-function PostChatRunning({
+function PostChatContent({
   component,
   site,
 }: {
@@ -268,7 +268,7 @@ export function PostChat({ id, site }: { id: string; site: SocialMediaSite }) {
       name="Post"
       id={id}
       whenRunning={(component) => (
-        <PostChatRunning component={component} site={site} />
+        <PostChatContent component={component} site={site} />
       )}
     />
   );

@@ -1,4 +1,4 @@
-import { Effect, pipe, Runtime } from "effect";
+import { Effect, Runtime } from "effect";
 import {
   Component,
   State,
@@ -9,6 +9,14 @@ import {
 import { z } from "zod";
 import { streamObject } from "ai";
 import { openai } from "../lib.js";
+
+function getInitialUserMessage(article: string) {
+  return `\
+Write a list of key points and interesting facts from the following article.
+
+> ${article}
+`;
+}
 
 // Generates key points from an article
 
@@ -25,19 +33,12 @@ function getKeyPoints(article: string) {
         output: "array",
         schema: z.string(),
         schemaName: "keyPoints",
+        system:
+          "You are a helpful assistant that generates key points from an article. These will be used to generate a post for the social media platform so make sure they are interesting and relevant to the post.",
         messages: [
           {
-            role: "system",
-            content:
-              "You are a helpful assistant that generates key points from an article.",
-          },
-          {
             role: "user",
-            content: `\
-Write a list of key points from the following article
-
-> ${article}
-`,
+            content: getInitialUserMessage(article),
           },
         ],
       });
@@ -62,25 +63,14 @@ const KeyPointsSetup = Component.setup("KeyPoints", {
 export const KeyPoints = KeyPointsSetup.build(
   ({ state }, payload: { article: string }) =>
     Effect.gen(function* () {
-      let run = 0;
-      // Retry 5 times
-      while (run < 5) {
-        // Call the OpenAI API with the article and get the key points
-        const keyPoints = yield* Api.io(
-          "key-points",
-          pipe(
-            getKeyPoints(payload.article),
-            Effect.catchTag("UnknownException", () => Effect.succeed(null))
-          )
-        );
+      // Call the OpenAI API with the article and get the key points
+      const keyPoints = yield* Api.io(
+        "key-points",
+        getKeyPoints(payload.article)
+      );
 
-        yield* State.update(state.keyPoints, keyPoints ?? []);
+      yield* State.update(state.keyPoints, keyPoints);
 
-        if (keyPoints) {
-          return keyPoints;
-        }
-
-        run++;
-      }
+      return keyPoints;
     })
 );

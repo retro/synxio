@@ -1,19 +1,7 @@
 import { useSynxioCallEndpoint, Synxio } from "~/lib/synxio";
-import { z } from "zod";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
-import { useEffect, useMemo } from "react";
-import { Textarea } from "~/components/ui/textarea";
+import { useMemo } from "react";
 import { Button } from "~/components/ui/button";
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-} from "~/components/ui/form";
-import { EndpointRef, GetAppTypeComponent } from "@repo/core";
+import { GetAppTypeComponent } from "@repo/core";
 import { Spinner } from "~/components/spinner";
 import { siteNameToIcon, siteNameToTitle, SocialMediaSite } from "./util";
 import { PostChat } from "./post-chat";

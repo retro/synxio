@@ -36,7 +36,7 @@ export interface AppContextState {
       payload: any;
     }
   >;
-  authorizations: Record<string, boolean>;
+  authorizations: Record<string, Record<string, boolean>>;
 }
 
 export function makeAppContextState(appId: string): AppContextState {

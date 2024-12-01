@@ -173,8 +173,6 @@ export const Post = PostSetup.build(
     payload: { site: SocialMediaSite; keyPoints: string[] }
   ) =>
     Effect.gen(function* () {
-      // Define the messages to send to the OpenAI API. We don't need to store them
-      // in the DB, IO is durable, and messages can be recomputed as needed
       yield* State.update(state.isLoading, true);
       const initialUserMessage = getInitialUserMessage(payload);
       const messages: CoreMessage[] = [initialUserMessage];
