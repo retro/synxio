@@ -59,8 +59,8 @@ export class ComponentContextService {
     this.path = mountInfoToPath(mountInfo);
 
     this.id = hashString(this.path);
-    console.log("!", this.path);
-    console.log("!!", this.id);
+    //console.log("!", this.path);
+    //console.log("!!", this.id);
   }
   openEndpoint<T>(
     mountedOnProperty: string,
@@ -80,8 +80,8 @@ export class ComponentContextService {
         schema
       );
 
-      console.log("!!!", path);
-      console.log("!!!!", id);
+      //console.log("!!!", path);
+      //console.log("!!!!", id);
       return {
         value,
         url: endpointIdToUrl(id),

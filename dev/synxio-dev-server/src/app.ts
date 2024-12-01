@@ -6,6 +6,7 @@ import {
   Api,
   type GetAppType,
   ComponentContext,
+  AppContext,
 } from "@repo/core";
 import { z } from "zod";
 import { createOpenAI } from "@ai-sdk/openai";
@@ -183,7 +184,9 @@ const KeyPoints = KeyPointsSetup.build(
 function getKeyPoints(article: string) {
   return Effect.gen(function* () {
     const { state } = yield* KeyPointsSetup.Api;
-    const runSync = Runtime.runFork(yield* Effect.runtime<ComponentContext>());
+    const runSync = Runtime.runSync(
+      yield* Effect.runtime<ComponentContext | AppContext>()
+    );
 
     return yield* Effect.tryPromise(async () => {
       const result = streamObject({
@@ -208,16 +211,13 @@ Write a list of key points from the following article
         ],
       });
 
-      const keyPoints: string[] = [];
-
       for await (const keyPoint of result.elementStream) {
-        keyPoints.push(keyPoint);
         runSync(
           State.update(state.keyPoints, (current) => [...current, keyPoint])
         );
       }
 
-      return keyPoints;
+      return runSync(State.get(state.keyPoints));
     });
   });
 }

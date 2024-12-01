@@ -20,6 +20,8 @@ const jsondiffpatchInstance = jsondiffpatch.create({
   textDiff: { diffMatchPatch: diff_match_patch },
 });
 
+const userAuth = "twitterEditor";
+
 export function makeSynxioApp<
   T extends { rootName: string; components: Record<string, any> },
 >() {
@@ -45,7 +47,7 @@ export function makeSynxioApp<
     useEffect(() => {
       console.log("CONNECTING TO WS", props.appId);
       const socket = new WebSocket(
-        `ws://localhost:3000/api/${props.appId}/ws?token=twitterEditor`
+        `ws://localhost:3000/api/${props.appId}/ws?token=${userAuth}`
       );
       socket.onmessage = (event) => {
         const { type, value } = JSON.parse(event.data);
@@ -57,8 +59,6 @@ export function makeSynxioApp<
         } else if (type === "patch") {
           const currentStoreValue =
             synxioStore.get(synxioValue) ?? initialStoreValue;
-
-          console.log("PATCH VALUE", value);
 
           const newValue = produce(currentStoreValue, (draft) => {
             jsondiffpatchInstance.patch(draft.components, value);
@@ -120,7 +120,7 @@ export function makeSynxioApp<
     const callback = useCallback(
       (payload: GetEndpointRefValueType<T>) => {
         return fetch(
-          `http://localhost:3000/api/${appId}/endpoints/${endpointRef}`,
+          `http://localhost:3000/api/${appId}/endpoints/${endpointRef}?token=${userAuth}`,
           {
             method: "POST",
             headers: {

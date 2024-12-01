@@ -10,6 +10,8 @@ import {
   Chunk,
   Scope,
   Record,
+  SynchronizedRef,
+  Struct,
 } from "effect";
 import type { AnyComponent, GetAppComponentsPayloads } from "./Component.js";
 import { AppContext, AppContextService } from "./AppContext.js";
@@ -21,6 +23,7 @@ import {
 } from "./AppContext/AppContextState.js";
 import * as jsondiffpatch from "jsondiffpatch";
 import { diff_match_patch } from "@dmsnell/diff-match-patch";
+import { NoSuchElementException } from "effect/Cause";
 
 const jsondiffpatchInstance = jsondiffpatch.create({
   arrays: {
@@ -96,6 +99,70 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
       Effect.provideService(Scope.Scope, scope)
     );
 
+    // TODO: Add component generation to mix, so that we re-authorize components when they are re-mounted
+    const authorizeComponent = (
+      userAuthPayload: any,
+      componentId: string
+    ): Effect.Effect<boolean, NoSuchElementException> =>
+      Effect.gen(function* () {
+        const appContextState = yield* SynchronizedRef.updateAndGetEffect(
+          appContextService.state,
+          (appContextState) =>
+            Effect.gen(function* () {
+              const componentState = yield* Record.get(
+                appContextState.components,
+                componentId
+              );
+
+              const metadata = yield* Record.get(
+                appContextState.componentsMetadata,
+                componentId
+              );
+
+              const authorization = yield* pipe(
+                Record.get(appContextState.authorizations, componentId),
+                Option.match({
+                  onSome: (value) => Effect.succeed(value),
+                  onNone: () =>
+                    authorizer
+                      ? authorizer(userAuthPayload, {
+                          name: componentState.name,
+                          payload: metadata.payload,
+                        })
+                      : Effect.succeed(true),
+                })
+              );
+
+              return Struct.evolve(appContextState, {
+                authorizations: (authorizations) =>
+                  Record.set(authorizations, componentId, authorization),
+              });
+            })
+        );
+
+        const componentState = yield* Record.get(
+          appContextState.components,
+          componentId
+        );
+
+        const parentId = componentState.parentId;
+
+        const componentAuthorization = yield* Record.get(
+          appContextState.authorizations,
+          componentId
+        );
+
+        if (componentAuthorization && parentId === null) {
+          return true;
+        } else if (componentAuthorization && parentId !== null) {
+          return yield* Effect.suspend(() =>
+            authorizeComponent(userAuthPayload, parentId)
+          );
+        }
+
+        return false;
+      });
+
     const authorizeComponentTree = (
       userAuthPayload: any,
       components: AppContextState["components"]
@@ -107,23 +174,15 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
         return yield* pipe(
           components,
           Record.toEntries,
-          Effect.forEach(([id, component]) =>
+          Effect.forEach(([componentId, component]) =>
             Effect.gen(function* () {
-              const appContextState = yield* Ref.get(appContextService.state);
-              const metadata = yield* Record.get(
-                appContextState.componentsMetadata,
-                id
+              const isAuthorized = yield* authorizeComponent(
+                userAuthPayload,
+                componentId
               );
 
-              const isAuthorized = yield* authorizer(userAuthPayload, {
-                name: component.name,
-                payload: metadata.payload,
-              });
-
-              console.log(isAuthorized);
-
               return [
-                id,
+                componentId,
                 isAuthorized
                   ? component
                   : {

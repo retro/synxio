@@ -99,7 +99,6 @@ const appServer = AppServer.make(
       Effect.gen(function* () {
         switch (component.name) {
           case "Post": {
-            console.log(userPayload, component);
             return (
               userPayload === "editor" ||
               (userPayload === "facebookEditor" &&

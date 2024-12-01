@@ -36,8 +36,15 @@ export interface AppContextState {
       payload: any;
     }
   >;
+  authorizations: Record<string, boolean>;
 }
 
 export function makeAppContextState(appId: string): AppContextState {
-  return { appId, openEndpoints: {}, components: {}, componentsMetadata: {} };
+  return {
+    appId,
+    openEndpoints: {},
+    components: {},
+    componentsMetadata: {},
+    authorizations: {},
+  };
 }
