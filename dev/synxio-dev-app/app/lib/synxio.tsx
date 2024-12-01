@@ -1,7 +1,7 @@
 import React, { useMemo, useEffect, useCallback } from "react";
 import { atom, createStore, useAtom, Provider, useAtomValue } from "jotai";
 import invariant from "tiny-invariant";
-import { App } from "@repo/synxio-dev-server/app";
+import { SocialMediaGeneratorApp } from "@repo/synxio-dev-server/app";
 import {
   AnyEndpointRef,
   ComponentState,
@@ -20,7 +20,7 @@ const jsondiffpatchInstance = jsondiffpatch.create({
   textDiff: { diffMatchPatch: diff_match_patch },
 });
 
-const userAuth = "twitterEditor";
+const userAuth = "editor";
 
 export function makeSynxioApp<
   T extends { rootName: string; components: Record<string, any> },
@@ -109,7 +109,9 @@ export function makeSynxioApp<
     return componentValue as Extract<T["components"], { name: TComponentName }>;
   };
 
-  const useSynxioCallEndpoint = <T extends AnyEndpointRef>(endpointRef: T) => {
+  const useSynxioCallEndpoint = <T extends AnyEndpointRef>(
+    endpointRef: T | undefined
+  ) => {
     const appId = useAtomValue(synxioValue)?.appId;
 
     invariant(
@@ -117,8 +119,11 @@ export function makeSynxioApp<
       "useSynxioCallEndpoint should be used within <Synxio.Provider>"
     );
 
-    const callback = useCallback(
-      (payload: GetEndpointRefValueType<T>) => {
+    const callback = useMemo(() => {
+      if (!endpointRef) {
+        return null;
+      }
+      return (payload: GetEndpointRefValueType<T>) => {
         return fetch(
           `http://localhost:3000/api/${appId}/endpoints/${endpointRef}?token=${userAuth}`,
           {
@@ -130,9 +135,8 @@ export function makeSynxioApp<
             body: JSON.stringify(payload),
           }
         );
-      },
-      [appId, endpointRef]
-    );
+      };
+    }, [appId, endpointRef]);
 
     return callback;
   };
@@ -201,4 +205,4 @@ export function makeSynxioApp<
 }
 
 export const { Synxio, useSynxio, useSynxioCallEndpoint } =
-  makeSynxioApp<App>();
+  makeSynxioApp<SocialMediaGeneratorApp>();

@@ -237,6 +237,19 @@ export type GetAppType<T extends AnyComponent> = {
   components: GetComponentTreeType<T>;
 };
 
+export type GetAppTypeComponent<
+  TAppType extends {
+    components: {
+      name: string;
+      status: "running" | "completed" | "failed" | "forbidden";
+    };
+  },
+  TName extends string,
+> = Extract<
+  TAppType["components"],
+  { name: TName; status: "running" | "completed" | "failed" }
+>;
+
 export type GetComponentTreeType<T extends AnyComponent> =
   | GetComponentType<T>
   | {
@@ -294,7 +307,7 @@ export type GetEndpointRefValueType<T> =
   T extends EndpointRef<infer U> ? U : never;
 
 export type GetComponentEndpointsType<T extends AnyComponentSetup> = Simplify<{
-  [TKey in keyof GetComponentSetupConfig<T>["endpoints"]]: EndpointRef<
+  [TKey in keyof GetComponentSetupConfig<T>["endpoints"]]?: EndpointRef<
     GetEndpointSchemaType<GetComponentSetupConfig<T>["endpoints"][TKey]>
   >;
 }>;

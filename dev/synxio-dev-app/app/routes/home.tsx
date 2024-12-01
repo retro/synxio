@@ -72,8 +72,8 @@ export default function Home() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto text-sm flex flex-col gap-4 p-4">
-      <h1 className="text-xl font-bold">Social Media Generator</h1>
+    <div className="max-w-2xl mx-auto text-sm flex flex-col gap-4 p-4">
+      <h1 className="text-xl font-semibold">Social Media Post Generator</h1>
       <div className="space-y-4">
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">

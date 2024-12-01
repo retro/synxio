@@ -1,7 +1,6 @@
 import { Effect } from "effect";
 import {
   CallEndpointResult,
-  App,
   StateUpdate,
   GetAppRootComponent,
   AnyApp,
@@ -11,7 +10,7 @@ import express from "express";
 import http from "http";
 import * as ptr from "path-to-regexp";
 import { WebSocketServer } from "ws";
-import { SocialMediaGenerator } from "./app.js";
+import { SocialMediaGeneratorApp } from "./app.js";
 import cors from "cors";
 import { randomUUID } from "crypto";
 import { z } from "zod";
@@ -85,36 +84,7 @@ class AppServer<TApp extends ServableApp, TAppAuthorizerUserPayload> {
   }
 }
 
-const appServer = AppServer.make(
-  App.build(
-    SocialMediaGenerator,
-    (
-      userPayload:
-        | "editor"
-        | "facebookEditor"
-        | "instagramEditor"
-        | "twitterEditor",
-      component
-    ) =>
-      Effect.gen(function* () {
-        switch (component.name) {
-          case "Post": {
-            return (
-              userPayload === "editor" ||
-              (userPayload === "facebookEditor" &&
-                component.payload.site === "facebook") ||
-              (userPayload === "instagramEditor" &&
-                component.payload.site === "instagram") ||
-              (userPayload === "twitterEditor" &&
-                component.payload.site === "twitter")
-            );
-          }
-          default:
-            return true;
-        }
-      })
-  )
-);
+const appServer = AppServer.make(SocialMediaGeneratorApp);
 
 const UserAuthSchema = z.union([
   z.literal("editor"),

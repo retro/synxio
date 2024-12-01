@@ -225,7 +225,7 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
 
     return {
       callEndpoint: (
-        userAuthPayload: any,
+        _userAuthPayload: any,
         id: string,
         payload: unknown
       ): Promise<CallEndpointResult> =>
@@ -295,7 +295,7 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
 
 export class App<
   TRootComponent extends AnyComponent,
-  TAuthorizer extends AppAuthorizer<TRootComponent>,
+  _TAuthorizer extends AppAuthorizer<TRootComponent>,
 > {
   static build<
     TRootComponent extends AnyComponent,
