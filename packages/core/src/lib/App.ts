@@ -71,11 +71,12 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
     const scope = yield* Scope.make();
     //const runSync = EffectRuntime.runSync(yield* Effect.runtime());
 
-    const appContextService = yield* AppContextService.make(appId).pipe(
+    const persistence = yield* PersistenceService.makeLive(appId).pipe(
       Effect.provideService(Scope.Scope, scope)
     );
 
-    const persistence = yield* PersistenceService.makeLive(appId).pipe(
+    const appContextService = yield* AppContextService.make(appId).pipe(
+      Effect.provideService(Persistence, persistence),
       Effect.provideService(Scope.Scope, scope)
     );
 
@@ -224,7 +225,7 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
         Effect.gen(function* () {
           const scope = yield* Effect.scope;
           const fiber = yield* pipe(
-            appContextService.mountComponent<TRootComponent>(
+            appContextService.components.mount<TRootComponent>(
               scope,
               rootComponent,
               {
@@ -252,7 +253,7 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
       ): Promise<CallEndpointResult> =>
         runPromise(
           Effect.gen(function* () {
-            const endpoint = yield* appContextService.getEndpointCallback(id);
+            const endpoint = yield* appContextService.endpoints.getCallback(id);
             if (endpoint) {
               yield* endpoint(payload);
               return { type: "success" };

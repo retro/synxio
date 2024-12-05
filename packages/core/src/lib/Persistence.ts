@@ -9,7 +9,13 @@ export class PersistenceService {
         filename: `./tmp/db.sqlite`,
       });
 
-      yield* sql`CREATE TABLE IF NOT EXISTS persistence (id TEXT PRIMARY KEY UNIQUE, data BLOB NOT NULL)`;
+      yield* sql`\
+CREATE TABLE IF NOT EXISTS persistence (
+  appId TEXT NOT NULL, 
+  id TEXT PRIMARY KEY UNIQUE, 
+  position INTEGER NOT NULL, 
+  data BLOB NOT NULL
+)`;
 
       return new PersistenceService(appId, sql);
     });
@@ -36,8 +42,23 @@ export class PersistenceService {
     return Effect.gen(this, function* () {
       const fullId = `${this.appId}/${id}`;
       const serialized = new Uint8Array(v8.serialize(data));
-      yield* this
-        .sql`INSERT OR REPLACE INTO persistence (id, data) VALUES (${fullId}, ${serialized})`;
+      yield* this.sql`\
+INSERT OR REPLACE INTO persistence (appId, id, position, data) 
+VALUES (
+  ${this.appId}, 
+  ${fullId}, 
+  coalesce((SELECT MAX(position) FROM persistence WHERE appId = ${this.appId}), 0) + 1, 
+  ${serialized}
+)
+        `.pipe(
+        Effect.catchTag("SqlError", (value) =>
+          Effect.gen(function* () {
+            console.log(value.message);
+            console.log(value.cause);
+            yield* Effect.die(value);
+          })
+        )
+      );
     });
   }
 }

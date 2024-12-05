@@ -21,9 +21,9 @@ const SocialMediaGeneratorSetup = Component.setup("SocialMediaGenerator", {
   },
   components: {
     KeyPoints,
-    InstagramPost: Post,
+    /*InstagramPost: Post,
     FacebookPost: Post,
-    TwitterPost: Post,
+    TwitterPost: Post,*/
   },
 });
 
@@ -39,6 +39,7 @@ export const SocialMediaGenerator = SocialMediaGeneratorSetup.build(
   ) =>
     Effect.gen(function* () {
       yield* State.update(state.article, payload.article);
+      console.log("AAA");
 
       // Generate key points from the article
       const keyPoints = yield* components
@@ -51,8 +52,7 @@ export const SocialMediaGenerator = SocialMediaGeneratorSetup.build(
         return;
       }
 
-      yield* State.update(state.keyPoints, () => keyPoints);
-
+      /*
       // Spawn components for each selected social media platform
       const postComponents = pipe(
         [
@@ -81,6 +81,6 @@ export const SocialMediaGenerator = SocialMediaGeneratorSetup.build(
       // Wait for all components to complete - workflow is done
       // You could call an API here to send the posts to your backend
 
-      const posts = yield* Fiber.joinAll(postComponents);
+      yield* Fiber.joinAll(postComponents);*/
     })
 );

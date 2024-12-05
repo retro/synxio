@@ -61,6 +61,7 @@ class AppServer<TApp extends ServableApp, TAppAuthorizerUserPayload> {
     payload: Parameters<GetAppRootComponent<TApp>["mount"]>[0]
   ) {
     const app = await Effect.runPromise(this.app.initialize(appId, payload));
+    console.log("INITIALIZED", appId);
     this.apps.set(appId, app);
     return app;
   }

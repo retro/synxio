@@ -1,11 +1,5 @@
-import { Effect, Runtime } from "effect";
-import {
-  Component,
-  State,
-  Api,
-  ComponentContext,
-  AppContext,
-} from "@repo/core";
+import { Effect, Stream, Array } from "effect";
+import { Component, State, Api } from "@repo/core";
 import { z } from "zod";
 import { streamObject } from "ai";
 import { openai } from "../lib.js";
@@ -21,37 +15,30 @@ Write a list of key points and interesting facts from the following article.
 // Generates key points from an article
 
 function getKeyPoints(article: string) {
-  return Effect.gen(function* () {
-    const { state } = yield* KeyPointsSetup.Api;
-    const runSync = Runtime.runSync(
-      yield* Effect.runtime<ComponentContext | AppContext>()
-    );
+  return Api.IO.withEventStream<string>().make(
+    "key-points",
+    ({ unsafeEmitEvent }) =>
+      Effect.tryPromise(async () => {
+        const result = streamObject({
+          model: openai("gpt-4o-2024-08-06"),
+          output: "array",
+          schema: z.string(),
+          schemaName: "keyPoints",
+          system:
+            "You are a helpful assistant that generates key points from an article. These will be used to generate a post for the social media platform so make sure they are interesting and relevant to the post.",
+          messages: [
+            {
+              role: "user",
+              content: getInitialUserMessage(article),
+            },
+          ],
+        });
 
-    return yield* Effect.tryPromise(async () => {
-      const result = streamObject({
-        model: openai("gpt-4o-2024-08-06"),
-        output: "array",
-        schema: z.string(),
-        schemaName: "keyPoints",
-        system:
-          "You are a helpful assistant that generates key points from an article. These will be used to generate a post for the social media platform so make sure they are interesting and relevant to the post.",
-        messages: [
-          {
-            role: "user",
-            content: getInitialUserMessage(article),
-          },
-        ],
-      });
-
-      for await (const keyPoint of result.elementStream) {
-        runSync(
-          State.update(state.keyPoints, (current) => [...current, keyPoint])
-        );
-      }
-
-      return runSync(State.get(state.keyPoints));
-    });
-  });
+        for await (const keyPoint of result.elementStream) {
+          unsafeEmitEvent(keyPoint);
+        }
+      })
+  );
 }
 
 const KeyPointsSetup = Component.setup("KeyPoints", {
@@ -63,14 +50,14 @@ const KeyPointsSetup = Component.setup("KeyPoints", {
 export const KeyPoints = KeyPointsSetup.build(
   ({ state }, payload: { article: string }) =>
     Effect.gen(function* () {
-      // Call the OpenAI API with the article and get the key points
-      const keyPoints = yield* Api.io(
-        "key-points",
-        getKeyPoints(payload.article)
+      const { eventStream } = yield* getKeyPoints(payload.article);
+
+      yield* Stream.runForEach(eventStream, (value) =>
+        State.update(state.keyPoints, (current) => Array.append(current, value))
       );
 
-      yield* State.update(state.keyPoints, keyPoints);
+      console.log("DONE");
 
-      return keyPoints;
+      return yield* State.get(state.keyPoints);
     })
 );

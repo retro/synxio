@@ -1,9 +1,9 @@
-import { Context, Effect, pipe, Schema, Option, Scope } from "effect";
+import { Context, Effect, Schema, Scope } from "effect";
 import { AppContext } from "./AppContext.js";
-import { Persistence } from "./Persistence.js";
 import type { AnyComponent, GetComponentPayload } from "./Component.js";
 import { endpointIdToUrl } from "./Endpoint.js";
 import crypto from "node:crypto";
+import { IOLazyEffect } from "./AppContext/Io.js";
 
 function hashString(path: string) {
   const hasher = crypto.createHash("sha256");
@@ -71,10 +71,11 @@ export class ComponentContextService {
       const runtimeContext = yield* AppContext;
       const path = `endpoint:${this.path}/${mountedOnProperty}:${key}`;
       const id = hashString(path);
-      const value = yield* runtimeContext.openEndpoint<T>(
+      const value = yield* runtimeContext.endpoints.open<T>(
         {
           componentId: this.id,
           mountedOnProperty,
+          path,
           id,
         },
         schema
@@ -90,23 +91,20 @@ export class ComponentContextService {
   }
   setState(newState: Record<string, unknown>) {
     return Effect.gen(this, function* () {
-      const runtimeContextService = yield* AppContext;
-      return yield* runtimeContextService.setComponentState(this.id, newState);
+      const appContextService = yield* AppContext;
+      return yield* appContextService.componentState.set(this.id, newState);
     });
   }
   getStateKeyValue(key: string) {
     return Effect.gen(this, function* () {
-      const runtimeContextService = yield* AppContext;
-      return yield* runtimeContextService.getComponentStateKeyValue(
-        this.id,
-        key
-      );
+      const appContextService = yield* AppContext;
+      return yield* appContextService.componentState.getKeyValue(this.id, key);
     });
   }
   updateAndGetStateKeyValue(key: string, updater: (value: unknown) => unknown) {
     return Effect.gen(this, function* () {
-      const runtimeContextService = yield* AppContext;
-      return yield* runtimeContextService.updateAndGetComponentStateKeyValue(
+      const appContextService = yield* AppContext;
+      return yield* appContextService.componentState.updateAndGetKeyValue(
         this.id,
         key,
         updater
@@ -115,25 +113,29 @@ export class ComponentContextService {
   }
   io<A, E, R>(key: string, eff: Effect.Effect<A, E, R>) {
     return Effect.gen(this, function* () {
-      const persistence = yield* Persistence;
       const id = `io:${this.path}/${key}`;
-      return yield* pipe(
-        persistence.get(id),
-        Effect.flatMap((value) =>
-          pipe(
-            value,
-            Option.match({
-              onSome: (value) => Effect.succeed(value as A),
-              onNone: () =>
-                Effect.gen(this, function* () {
-                  const value = yield* eff as Effect.Effect<A, E, R>;
-                  yield* persistence.set(id, value);
-                  return value;
-                }),
-            })
-          )
-        )
-      );
+      const appContextService = yield* AppContext;
+      return yield* appContextService.io.run(id, eff);
+    });
+  }
+  ioWithoutEventStream<A, E, R>(
+    key: string,
+    lazyEffect: IOLazyEffect<A, E, R, never>
+  ) {
+    return Effect.gen(this, function* () {
+      const id = `io:${this.path}/${key}`;
+      const appContextService = yield* AppContext;
+      return yield* appContextService.io.runWithoutEventStream(id, lazyEffect);
+    });
+  }
+  ioWithEventStream<T, A, E, R>(
+    key: string,
+    lazyEffect: IOLazyEffect<A, E, R, T>
+  ) {
+    return Effect.gen(this, function* () {
+      const id = `io:${this.path}/${key}`;
+      const appContextService = yield* AppContext;
+      return yield* appContextService.io.runWithEventStream(id, lazyEffect);
     });
   }
   mount<TComponent extends AnyComponent>(
@@ -144,8 +146,8 @@ export class ComponentContextService {
     payload: GetComponentPayload<TComponent>
   ) {
     return Effect.gen(this, function* () {
-      const runtimeContextService = yield* AppContext;
-      return yield* runtimeContextService.mountComponent<TComponent>(
+      const appContextService = yield* AppContext;
+      return yield* appContextService.components.mount<TComponent>(
         this.scope,
         component,
         {
