@@ -56,8 +56,6 @@ export const KeyPoints = KeyPointsSetup.build(
         State.update(state.keyPoints, (current) => Array.append(current, value))
       );
 
-      console.log("DONE");
-
       return yield* State.get(state.keyPoints);
     })
 );

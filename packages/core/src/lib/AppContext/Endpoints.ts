@@ -44,12 +44,16 @@ export class AppContextEndpoints {
       );
 
       return yield* pipe(
-        this.persistence.get(mountInfo.id),
+        this.persistence.get(mountInfo.path),
         Effect.andThen((value) =>
           pipe(
             value,
             Option.match({
-              onSome: (value) => Effect.succeed(Effect.succeed(value as T)),
+              onSome: (value) =>
+                Effect.gen(this, function* () {
+                  yield* this.persistence.resumeStreamData(mountInfo.path);
+                  return Effect.succeed(value.payload as T);
+                }),
               onNone: () => openEndpoint,
             })
           )
@@ -132,7 +136,7 @@ export class AppContextEndpoints {
         yield* this.persistence.set({
           type: "data",
           id: mountInfo.path,
-          data: value,
+          payload: value,
         });
         return value;
       });

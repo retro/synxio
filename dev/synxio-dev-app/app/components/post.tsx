@@ -27,8 +27,8 @@ function PostCandidates({
   return (
     <div className="space-y-4">
       {postCandidates.map((post, idx) => (
-        <div className="border rounded p-4 space-y-4">
-          <PostCandidate key={idx} post={post} />
+        <div className="border rounded p-4 space-y-4" key={idx}>
+          <PostCandidate post={post} />
           <hr />
           <div className="flex justify-end">
             <Button

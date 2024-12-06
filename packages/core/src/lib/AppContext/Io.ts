@@ -34,7 +34,7 @@ export class AppContextIo {
                   yield* this.persistence.set({
                     type: "data",
                     id,
-                    data: value,
+                    payload: value,
                   });
                   return value;
                 }),
@@ -52,7 +52,7 @@ export class AppContextIo {
       const persisted = yield* this.persistence.get(id);
 
       return yield* Option.match(persisted, {
-        onSome: (value: A) => Effect.succeed(value),
+        onSome: (value) => Effect.succeed(value.payload as A),
         onNone: () =>
           Effect.gen(this, function* () {
             const value = yield* pipe(
@@ -70,34 +70,60 @@ export class AppContextIo {
     lazyEffect: IOLazyEffect<A, E, R, T>
   ) {
     return Effect.gen(this, function* () {
+      const streamId = `${id}:stream`;
       const persisted = yield* this.persistence.get(id);
       return yield* Option.match(persisted, {
-        onSome: (value: A) =>
-          Effect.succeed({
-            value: Fiber.succeed(value),
-            eventStream: Stream.fromIterable<T>([]),
+        onSome: (value) =>
+          Effect.gen(this, function* () {
+            const eventStream = yield* pipe(
+              this.persistence.getPersistedQueue<T>(streamId),
+              Effect.map(Stream.fromQueue)
+            );
+
+            yield* this.persistence.resumeStreamData(id);
+
+            return {
+              value: Fiber.succeed(value.payload as A),
+              eventStream,
+            };
           }),
         onNone: () =>
           Effect.gen(this, function* () {
-            const runSync = Runtime.runSync(yield* Effect.runtime());
-            const emitQueue = yield* Queue.unbounded<T>();
+            let eventCounter = 0;
+
+            const eventQueue = yield* Queue.unbounded<T>();
             const eventStream = pipe(
-              Stream.fromQueue(emitQueue, { shutdown: true }),
+              Stream.fromQueue(eventQueue),
               Stream.tap((value) =>
-                Effect.succeed(console.log("EMITTED", value))
+                Effect.gen(this, function* () {
+                  const eventId = `${streamId}[${eventCounter}]`;
+                  yield* this.persistence.set({
+                    type: "streamData",
+                    id: eventId,
+                    parentId: streamId,
+                    payload: value,
+                  });
+                  eventCounter++;
+                })
               )
             );
 
+            const runSync = Runtime.runSync(yield* Effect.runtime());
+
             const value = yield* pipe(
               lazyEffect({
-                emitEvent: (value: T) => Queue.offer(emitQueue, value),
+                emitEvent: (value: T) => Queue.offer(eventQueue, value),
                 unsafeEmitEvent: (value: T) =>
-                  runSync(Queue.offer(emitQueue, value)),
+                  runSync(Queue.offer(eventQueue, value)),
               }),
               Effect.onExit((exit) =>
                 Effect.gen(this, function* () {
-                  yield* Queue.shutdown(emitQueue);
+                  yield* Queue.shutdown(eventQueue);
                   yield* Effect.yieldNow();
+                  yield* this.persistence.set({
+                    type: "streamDone",
+                    id: streamId,
+                  });
                   yield* this.persist(id, exit);
                 })
               ),
@@ -118,13 +144,13 @@ export class AppContextIo {
         this.persistence.set({
           type: "data",
           id,
-          data,
+          payload: data,
         }),
       onFailure: (error) =>
         this.persistence.set({
           type: "error",
           id,
-          error,
+          payload: error,
         }),
     });
   }

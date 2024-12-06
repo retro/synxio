@@ -6,17 +6,19 @@ import {
   FiberMap,
   Queue,
   Stream,
+  Ref,
 } from "effect";
 import {
   makeAppContextState,
   type AppContextState,
 } from "./AppContext/AppContextState.js";
 
-import { Persistence, PersistenceService } from "./Persistence.js";
 import {
-  AppContextPersistence,
+  Persistence,
   PersistencePayload,
-} from "./AppContext/Persistence.js";
+  PersistenceService,
+} from "./Persistence.js";
+import { AppContextPersistence } from "./AppContext/Persistence.js";
 import { AppContextEndpoints } from "./AppContext/Endpoints.js";
 import { AppContextComponents } from "./AppContext/Components.js";
 import { AppContextComponentState } from "./AppContext/ComponentState.js";
@@ -29,6 +31,8 @@ export class AppContextService {
       const state = yield* SubscriptionRef.make(makeAppContextState(appId));
       const persistenceService = yield* Persistence;
       const persistenceQueue = yield* Queue.unbounded<PersistencePayload>();
+      const persistedQueues = yield* Ref.make({});
+      const resumingStreamDataSemaphore = yield* Effect.makeSemaphore(1);
 
       yield* Effect.forkDaemon(
         pipe(
@@ -37,9 +41,7 @@ export class AppContextService {
           Stream.runForEach((value) =>
             Effect.gen(function* () {
               console.log("PERSIST", value);
-              if (value.type === "data") {
-                yield* persistenceService.set(value.id, value.data);
-              }
+              yield* persistenceService.set(value);
             })
           )
         )
@@ -49,7 +51,9 @@ export class AppContextService {
         state,
         componentFibers,
         persistenceService,
-        persistenceQueue
+        persistenceQueue,
+        persistedQueues,
+        resumingStreamDataSemaphore
       );
     });
   }
@@ -64,11 +68,15 @@ export class AppContextService {
     readonly state: SubscriptionRef.SubscriptionRef<AppContextState>,
     private readonly componentFibers: FiberMap.FiberMap<string>,
     private readonly persistenceService: PersistenceService,
-    private readonly persistenceQueue: Queue.Queue<PersistencePayload>
+    private readonly persistenceQueue: Queue.Queue<PersistencePayload>,
+    private readonly persistedQueues: Ref.Ref<Record<string, Queue.Queue<any>>>,
+    private readonly resumingStreamDataSemaphore: Effect.Semaphore
   ) {
     this.persistence = new AppContextPersistence(
       this.persistenceService,
-      this.persistenceQueue
+      this.persistenceQueue,
+      this.persistedQueues,
+      this.resumingStreamDataSemaphore
     );
     this.endpoints = new AppContextEndpoints(this.state, this.persistence);
     this.components = new AppContextComponents(

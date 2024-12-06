@@ -1,14 +1,7 @@
-import { Effect, Schema, Runtime, Fiber, Array } from "effect";
-import {
-  Component,
-  State,
-  Endpoint,
-  Api,
-  ComponentContext,
-  AppContext,
-} from "@repo/core";
+import { Effect, Schema, Match, Fiber, Array, Stream, pipe } from "effect";
+import { Component, State, Endpoint, Api } from "@repo/core";
 import { z } from "zod";
-import { CoreMessage, streamText, tool } from "ai";
+import { CoreMessage, streamText, TextStreamPart, tool } from "ai";
 import { openai } from "../lib.js";
 
 type SocialMediaSite = "twitter" | "facebook" | "instagram";
@@ -54,6 +47,15 @@ const socialMediaPostTool = tool({
   },
 });
 
+const tools = {
+  socialMediaPost: socialMediaPostTool,
+};
+
+type GetPostStreamPart = Extract<
+  TextStreamPart<typeof tools>,
+  { type: "text-delta" } | { type: "tool-call"; toolName: "socialMediaPost" }
+>;
+
 function getPost({
   site,
   messages,
@@ -65,47 +67,58 @@ function getPost({
 }) {
   return Effect.gen(function* () {
     const { state } = yield* ChatMessageSetup.Api;
-    const runSync = Runtime.runSync(
-      yield* Effect.runtime<ComponentContext | AppContext>()
-    );
 
-    return yield* Effect.tryPromise(async () => {
-      const result = streamText({
-        model: openai("gpt-4o"),
-        temperature: 0.5,
-        system: getSystemPrompt(site),
-        messages,
-        tools: {
-          socialMediaPost: socialMediaPostTool,
-        },
-        toolChoice: forceTool
-          ? { type: "tool", toolName: "socialMediaPost" }
-          : "auto",
-      });
+    const { value, eventStream } =
+      yield* Api.IO.withEventStream<GetPostStreamPart>().make(
+        "chat-message",
+        ({ unsafeEmitEvent }) =>
+          Effect.tryPromise(async () => {
+            const result = streamText({
+              model: openai("gpt-4o"),
+              temperature: 0.5,
+              system: getSystemPrompt(site),
+              messages,
+              tools,
+              toolChoice: forceTool
+                ? { type: "tool", toolName: "socialMediaPost" }
+                : "auto",
+            });
+            for await (const part of result.fullStream) {
+              if (
+                part.type === "text-delta" ||
+                (part.type === "tool-call" &&
+                  part.toolName === "socialMediaPost")
+              ) {
+                unsafeEmitEvent(part);
+              }
+            }
 
-      for await (const part of result.fullStream) {
-        if (part.type === "text-delta") {
-          runSync(
+            return (await result.response).messages;
+          })
+      );
+
+    yield* pipe(
+      eventStream,
+      Stream.runForEach(
+        pipe(
+          Match.type<GetPostStreamPart>(),
+          Match.when({ type: "text-delta" }, (part) =>
             State.update(state.assistantMessage, (assistantMessage) =>
               assistantMessage
                 ? `${assistantMessage}${part.textDelta}`
                 : part.textDelta
             )
-          );
-        } else if (
-          part.type === "tool-call" &&
-          part.toolName === "socialMediaPost"
-        ) {
-          runSync(State.update(state.post, part.args));
-        }
-      }
+          ),
+          Match.when(
+            { type: "tool-call", toolName: "socialMediaPost" },
+            (part) => State.update(state.post, part.args)
+          ),
+          Match.exhaustive
+        )
+      )
+    );
 
-      return {
-        assistantMessage: runSync(State.get(state.assistantMessage)),
-        post: runSync(State.get(state.post)),
-        messages: (await result.response).messages,
-      };
-    });
+    return yield* value;
   });
 }
 
@@ -131,15 +144,12 @@ const ChatMessage = ChatMessageSetup.build(
   ) =>
     Effect.gen(function* () {
       yield* State.update(state.userMessage, payload.userMessage);
-      const { assistantMessage, post, messages } = yield* Api.io(
-        `chat-message`,
-        getPost(payload)
-      );
-      yield* State.update(state.assistantMessage, assistantMessage);
-      yield* State.update(state.post, post);
+
+      const messages = yield* getPost(payload);
+
       return {
         messages,
-        post,
+        post: yield* State.get(state.post),
       };
     })
 );

@@ -26,6 +26,8 @@ import { diff_match_patch } from "@dmsnell/diff-match-patch";
 import { NoSuchElementException } from "effect/Cause";
 import { randomUUID } from "crypto";
 
+const INITIAL_PAYLOAD_ID = "initialPayload";
+
 const jsondiffpatchInstance = jsondiffpatch.create({
   arrays: {
     detectMove: true,
@@ -82,12 +84,21 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
 
     const initialPayload = yield* Effect.gen(function* () {
       if (payload.type === "initialize") {
-        yield* persistence.set(`initialPayload`, payload.payload);
+        yield* persistence.set({
+          type: "data",
+          id: INITIAL_PAYLOAD_ID,
+          payload: payload.payload,
+        });
         return payload.payload;
       }
-      const persistedPayload = (yield* persistence.get(
-        `initialPayload`
-      )) as Option.Option<Parameters<TRootComponent["mount"]>[0]>;
+      const persistedPayload = yield* pipe(
+        persistence.get(INITIAL_PAYLOAD_ID),
+        Effect.map(
+          Option.map(
+            (value) => value.payload as Parameters<TRootComponent["mount"]>[0]
+          )
+        )
+      );
 
       return yield* persistedPayload;
     }).pipe(Effect.catchTag("NoSuchElementException", Effect.die));
@@ -220,6 +231,8 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
         );
       });
 
+    yield* appContextService.persistence.resumeStreamData(INITIAL_PAYLOAD_ID);
+
     yield* Effect.forkDaemon(
       pipe(
         Effect.gen(function* () {
@@ -237,6 +250,7 @@ function initializeOrResume<TRootComponent extends AnyComponent>(
             Effect.provideService(Persistence, persistence),
             Effect.provideService(AppContext, appContextService)
           );
+
           return yield* fiber;
         }),
         Effect.provideService(Scope.Scope, scope)

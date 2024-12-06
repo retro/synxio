@@ -1,20 +1,70 @@
-import { Effect, Context, Option, pipe } from "effect";
+import { Effect, Context, Option, pipe, Schema, Either } from "effect";
 import v8 from "node:v8";
 import { SqliteClient } from "@effect/sql-sqlite-node";
+import { Reactivity } from "@effect/experimental";
+
+export type PersistencePayload =
+  | {
+      type: "data";
+      id: string;
+      payload: unknown;
+    }
+  | {
+      type: "streamData";
+      id: string;
+      parentId: string;
+      payload: unknown;
+    }
+  | {
+      type: "streamDone";
+      id: string;
+    }
+  | {
+      type: "error";
+      id: string;
+      payload: unknown;
+    };
+
+const PersistenceOutputPayload = Schema.Union(
+  Schema.Struct({
+    type: Schema.Literal("data"),
+    id: Schema.String,
+    payload: Schema.Unknown,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("streamData"),
+    id: Schema.String,
+    parentId: Schema.String,
+    payload: Schema.Unknown,
+  }),
+  Schema.Struct({ type: Schema.Literal("streamDone"), id: Schema.String }),
+  Schema.Struct({
+    type: Schema.Literal("error"),
+    id: Schema.String,
+    payload: Schema.Unknown,
+  })
+);
+
+const persistenceOutputPayloadDecoder = Schema.decodeUnknownEither(
+  PersistenceOutputPayload
+);
 
 export class PersistenceService {
   static makeLive(appId: string) {
     return Effect.gen(function* () {
       const sql = yield* SqliteClient.make({
         filename: `./tmp/db.sqlite`,
-      });
+      }).pipe(Effect.provide(Reactivity.layer));
 
       yield* sql`\
 CREATE TABLE IF NOT EXISTS persistence (
   appId TEXT NOT NULL, 
-  id TEXT PRIMARY KEY UNIQUE, 
+  parentId TEXT,
+  id TEXT NOT NULL, 
+  fullId TEXT PRIMARY KEY UNIQUE,
   position INTEGER NOT NULL, 
-  data BLOB NOT NULL
+  type TEXT NOT NULL,
+  payload BLOB
 )`;
 
       return new PersistenceService(appId, sql);
@@ -27,27 +77,66 @@ CREATE TABLE IF NOT EXISTS persistence (
   ) {}
   get(id: string) {
     return Effect.gen(this, function* () {
-      const fullId = `${this.appId}/${id}`;
-      const result = yield* this
-        .sql`SELECT data FROM persistence WHERE id = ${fullId}`;
-      const data = result[0]?.data;
+      const result = (yield* this
+        .sql`SELECT appId, id, parentId, position, type, payload FROM persistence WHERE id = ${id} AND appId = ${this.appId}`)[0];
 
-      return pipe(
-        Option.fromNullable(data),
-        Option.map((data) => v8.deserialize(data as Uint8Array))
-      );
+      return this.parsePersistedPayload(result);
     });
   }
-  set(id: string, data: unknown) {
+  getAfter(id: string) {
     return Effect.gen(this, function* () {
-      const fullId = `${this.appId}/${id}`;
-      const serialized = new Uint8Array(v8.serialize(data));
+      const result = (yield* this.sql`\
+SELECT appId, id, parentId, position, type, payload 
+FROM persistence 
+WHERE appId = ${this.appId} AND position > (SELECT position FROM persistence WHERE id = ${id}) 
+ORDER BY position ASC LIMIT 1
+      `)[0];
+
+      return this.parsePersistedPayload(result);
+    });
+  }
+  private parsePersistedPayload(result: unknown) {
+    return pipe(
+      Option.fromNullable(result),
+      Option.flatMap((result) =>
+        pipe(
+          persistenceOutputPayloadDecoder(result),
+          Either.match({
+            onLeft: () => Option.none(),
+            onRight: (value) => Option.some(value),
+          })
+        )
+      ),
+      Option.map((value) => ({
+        ...value,
+        payload:
+          "payload" in value
+            ? value.payload
+              ? v8.deserialize(value.payload as Uint8Array)
+              : null
+            : null,
+      }))
+    );
+  }
+  set(input: PersistencePayload) {
+    return Effect.gen(this, function* () {
+      const fullId = `${this.appId}/${input.id}`;
+      const serialized =
+        "payload" in input
+          ? input.payload
+            ? new Uint8Array(v8.serialize(input.payload))
+            : null
+          : null;
+
       yield* this.sql`\
-INSERT OR REPLACE INTO persistence (appId, id, position, data) 
+INSERT OR REPLACE INTO persistence (appId, id, fullId, parentId, position, type, payload) 
 VALUES (
   ${this.appId}, 
+  ${input.id},
   ${fullId}, 
+  ${"parentId" in input ? input.parentId : null},
   coalesce((SELECT MAX(position) FROM persistence WHERE appId = ${this.appId}), 0) + 1, 
+  ${input.type},
   ${serialized}
 )
         `.pipe(
