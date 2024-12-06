@@ -71,8 +71,8 @@ function getPost({
     const { value, eventStream } =
       yield* Api.IO.withEventStream<GetPostStreamPart>().make(
         "chat-message",
-        ({ unsafeEmitEvent }) =>
-          Effect.tryPromise(async () => {
+        ({ emitEvent }) =>
+          Effect.gen(function* () {
             const result = streamText({
               model: openai("gpt-4o"),
               temperature: 0.5,
@@ -83,17 +83,25 @@ function getPost({
                 ? { type: "tool", toolName: "socialMediaPost" }
                 : "auto",
             });
-            for await (const part of result.fullStream) {
-              if (
-                part.type === "text-delta" ||
-                (part.type === "tool-call" &&
-                  part.toolName === "socialMediaPost")
-              ) {
-                unsafeEmitEvent(part);
-              }
-            }
 
-            return (await result.response).messages;
+            yield* pipe(
+              Stream.fromAsyncIterable(
+                result.fullStream,
+                () => new Error("Stream Error")
+              ),
+              Stream.filter(
+                (part) =>
+                  part.type === "text-delta" ||
+                  (part.type === "tool-call" &&
+                    part.toolName === "socialMediaPost")
+              ),
+              Stream.runForEach((part) => emitEvent(part))
+            );
+
+            return yield* pipe(
+              Effect.promise(() => result.response),
+              Effect.andThen((response) => response.messages)
+            );
           })
       );
 
@@ -103,10 +111,9 @@ function getPost({
         pipe(
           Match.type<GetPostStreamPart>(),
           Match.when({ type: "text-delta" }, (part) =>
-            State.update(state.assistantMessage, (assistantMessage) =>
-              assistantMessage
-                ? `${assistantMessage}${part.textDelta}`
-                : part.textDelta
+            State.update(
+              state.assistantMessage,
+              (assistantMessage) => `${assistantMessage ?? ""}${part.textDelta}`
             )
           ),
           Match.when(

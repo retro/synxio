@@ -7,6 +7,7 @@ import {
   Stream,
   Exit,
   Fiber,
+  Chunk,
 } from "effect";
 import { AppContextPersistence } from "./Persistence.js";
 
@@ -76,8 +77,9 @@ export class AppContextIo {
         onSome: (value) =>
           Effect.gen(this, function* () {
             const eventStream = yield* pipe(
-              this.persistence.getPersistedQueue<T>(streamId),
-              Effect.map(Stream.fromQueue)
+              this.persistence.getPersistedQueue<Chunk.Chunk<T>>(streamId),
+              Effect.map(Stream.fromQueue),
+              Effect.map(Stream.flattenChunks)
             );
 
             yield* this.persistence.resumeStreamData(id);

@@ -1,18 +1,18 @@
-import { Effect, Queue, Ref, Record, Option, pipe } from "effect";
-import { PersistencePayload, PersistenceService } from "../Persistence.js";
+import { Effect, Queue, Ref, Record, Option, pipe, Chunk } from "effect";
+import { PersistenceInputPayload, PersistenceService } from "../Persistence.js";
 import { SqlError } from "@effect/sql";
 
 export class AppContextPersistence {
   constructor(
     private readonly persistence: PersistenceService,
-    private readonly persistenceQueue: Queue.Queue<PersistencePayload>,
+    private readonly persistenceQueue: Queue.Queue<PersistenceInputPayload>,
     private readonly persistedQueues: Ref.Ref<Record<string, Queue.Queue<any>>>,
     private readonly resumingStreamDataSemaphore: Effect.Semaphore
   ) {}
   get(id: string) {
     return this.persistence.get(id);
   }
-  set(persistencePayload: PersistencePayload) {
+  set(persistencePayload: PersistenceInputPayload) {
     return this.persistenceQueue.offer(persistencePayload);
   }
   getPersistedQueue<T>(id: string) {
@@ -48,6 +48,7 @@ export class AppContextPersistence {
   ): Effect.Effect<void, SqlError.SqlError> {
     return Effect.gen(this, function* () {
       const after = yield* this.persistence.getAfter(fromId);
+
       yield* pipe(
         after,
         Option.match({
@@ -59,7 +60,10 @@ export class AppContextPersistence {
                     value.parentId
                   );
 
-                  yield* Queue.offer(persistedQueue, value.payload);
+                  yield* Queue.offer(
+                    persistedQueue,
+                    Chunk.fromIterable(value.payload)
+                  );
 
                   return yield* Effect.suspend(() =>
                     this.resumeStreamDataStep(value.id)

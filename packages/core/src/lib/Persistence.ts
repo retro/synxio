@@ -3,18 +3,20 @@ import v8 from "node:v8";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Reactivity } from "@effect/experimental";
 
-export type PersistencePayload =
+export type PersistenceInputStreamDataPayload = {
+  type: "streamData";
+  id: string;
+  parentId: string;
+  payload: unknown;
+};
+
+export type PersistenceInputPayload =
   | {
       type: "data";
       id: string;
       payload: unknown;
     }
-  | {
-      type: "streamData";
-      id: string;
-      parentId: string;
-      payload: unknown;
-    }
+  | PersistenceInputStreamDataPayload
   | {
       type: "streamDone";
       id: string;
@@ -30,18 +32,25 @@ const PersistenceOutputPayload = Schema.Union(
     type: Schema.Literal("data"),
     id: Schema.String,
     payload: Schema.Unknown,
+    position: Schema.Number,
   }),
   Schema.Struct({
     type: Schema.Literal("streamData"),
     id: Schema.String,
     parentId: Schema.String,
     payload: Schema.Unknown,
+    position: Schema.Number,
   }),
-  Schema.Struct({ type: Schema.Literal("streamDone"), id: Schema.String }),
+  Schema.Struct({
+    type: Schema.Literal("streamDone"),
+    id: Schema.String,
+    position: Schema.Number,
+  }),
   Schema.Struct({
     type: Schema.Literal("error"),
     id: Schema.String,
     payload: Schema.Unknown,
+    position: Schema.Number,
   })
 );
 
@@ -88,7 +97,7 @@ CREATE TABLE IF NOT EXISTS persistence (
       const result = (yield* this.sql`\
 SELECT appId, id, parentId, position, type, payload 
 FROM persistence 
-WHERE appId = ${this.appId} AND position > (SELECT position FROM persistence WHERE id = ${id}) 
+WHERE appId = ${this.appId} AND position > (SELECT position FROM persistence WHERE appId = ${this.appId} AND id = ${id}) 
 ORDER BY position ASC LIMIT 1
       `)[0];
 
@@ -118,7 +127,7 @@ ORDER BY position ASC LIMIT 1
       }))
     );
   }
-  set(input: PersistencePayload) {
+  set(input: PersistenceInputPayload) {
     return Effect.gen(this, function* () {
       const fullId = `${this.appId}/${input.id}`;
       const serialized =
