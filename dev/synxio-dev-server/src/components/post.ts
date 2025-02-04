@@ -1,5 +1,5 @@
 import { Effect, Schema, Match, Fiber, Array, Stream, pipe } from "effect";
-import { Component, State, Endpoint, Api } from "@repo/core";
+import { Component, State, Endpoint, IO } from "@repo/core";
 import { z } from "zod";
 import { CoreMessage, streamText, TextStreamPart, tool } from "ai";
 import { openai } from "../lib.js";
@@ -69,7 +69,7 @@ function getPost({
     const { state } = yield* ChatMessageSetup.Api;
 
     const { value, eventStream } =
-      yield* Api.IO.withEventStream<GetPostStreamPart>().make(
+      yield* IO.withEventStream<GetPostStreamPart>().make(
         "chat-message",
         ({ emitEvent }) =>
           Effect.gen(function* () {

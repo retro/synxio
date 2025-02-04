@@ -79,6 +79,11 @@ export class AppContextPersistence {
                   }
 
                   yield* Queue.shutdown(persistedQueue);
+
+                  yield* Ref.update(this.persistedQueues, (persistedQueues) =>
+                    Record.remove(persistedQueues, value.id)
+                  );
+
                   return yield* Effect.suspend(() =>
                     this.resumeStreamDataStep(value.id)
                   );

@@ -120,6 +120,9 @@ export class AppContextIo {
               }),
               Effect.onExit((exit) =>
                 Effect.gen(this, function* () {
+                  while (!(yield* Queue.isEmpty(eventQueue))) {
+                    yield* Effect.yieldNow();
+                  }
                   yield* Queue.shutdown(eventQueue);
                   yield* Effect.yieldNow();
                   yield* this.persistence.set({

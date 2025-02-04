@@ -1,4 +1,4 @@
-import { Effect, type Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { ComponentContext } from "./ComponentContext.js";
 
 export class Endpoint<TEndpointSchema extends Schema.Schema<any, any, never>> {

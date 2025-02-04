@@ -1,5 +1,5 @@
 export * from "./lib/Component.js";
-export * from "./lib/Api.js";
+export * from "./lib/Io.js";
 export * from "./lib/Endpoint.js";
 export * from "./lib/State.js";
 export * from "./lib/App.js";

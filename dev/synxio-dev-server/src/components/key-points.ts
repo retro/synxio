@@ -1,5 +1,5 @@
 import { Effect, Stream, Array } from "effect";
-import { Component, State, Api } from "@repo/core";
+import { Component, State, IO } from "@repo/core";
 import { z } from "zod";
 import { streamObject } from "ai";
 import { openai } from "../lib.js";
@@ -15,7 +15,7 @@ Write a list of key points and interesting facts from the following article.
 // Generates key points from an article
 
 function getKeyPoints(article: string) {
-  return Api.IO.withEventStream<string>().make(
+  return IO.withEventStream<string>().make(
     "key-points",
     ({ unsafeEmitEvent }) =>
       Effect.tryPromise(async () => {
